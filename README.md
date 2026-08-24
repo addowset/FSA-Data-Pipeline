@@ -9,7 +9,7 @@ Full project brief: [CLAUDE.md](CLAUDE.md). Build proceeds in stages; see
 
 ## Status
 
-**Stages 1-3 of 7 (raw archive, parsing/storage, diffing) done.**
+**Stages 1-3 of 7 done. Stage 4 (Companies House) built, pending live verification.**
 
 Stage 1 — fetches the FHRS local-authority index and all 363 authorities'
 bulk XML files daily, archives every response unmodified (gzip-compressed)
@@ -46,8 +46,26 @@ quarantines triggered (real max seen so far is 58/authority/day, well
 under the 150 threshold). See "Design notes" for how the threshold
 numbers were chosen and their current limitations.
 
-Not yet built: live-API collection for priority authorities, Companies
-House matching, classification, metrics/monitoring, CSV export.
+Stage 4 (collection half) — fetches recent hospitality-sector
+incorporations (7 SIC codes in the 56xxx division, confirmed with the
+user 2026-08-24) via Companies House's Advanced Search REST endpoint
+(chosen over the Streaming API — see "Design notes"), a rolling 14-day
+trailing window re-fetched daily, same raw-archive-then-parse pattern as
+FHRS (`raw/companies-house/<date>/page_NNNN.json.gz`, gzip, never
+overwritten; `companies_current`/`company_observations` derived tables in
+the same database). **Not yet live-verified**: no Companies House API key
+was available while building this, so the parser is built against the
+documented response schema (cross-checked against Companies House's own
+developer docs, not just community write-ups) rather than an inspected
+real response — unlike every other data source in this project so far.
+13 tests pass against documentation-derived fixtures. **Not wired into
+`run_daily.ps1`** yet, deliberately — it would fail every day until a key
+is supplied. See "Running Companies House collection" below for what's
+needed to finish verifying this.
+
+Not yet built: the matcher (name similarity + postcode district, the
+"hard part" per the brief) and classification, live-API collection for
+priority FHRS authorities, metrics/monitoring, CSV export.
 
 ## Setup
 
@@ -111,6 +129,27 @@ Idempotent, same resume behaviour as the other scripts. An authority's
 first-ever successful collection has no prior snapshot to diff against,
 so it's skipped with no events emitted (not treated as a mass INSERT).
 
+## Running Companies House collection
+
+Not yet part of the daily scheduled run. To finish verifying this stage:
+
+1. Register for a free API key at
+   [developer.company-information.service.gov.uk](https://developer.company-information.service.gov.uk)
+   (I can't do this step — it's account creation).
+2. Set it as an environment variable: `$env:COMPANIES_HOUSE_API_KEY = "..."`
+   (PowerShell) — never commit it.
+3. Run collection, then parsing:
+
+```bash
+python scripts/collect_companies_house.py
+python scripts/parse_companies_house.py
+```
+
+Writes to `raw/companies-house/<today>/` and logs to
+`logs/companies_house_collect_<date>.log` /
+`..._parse_<date>.log`. Once a real response confirms the documented
+schema (see "Design notes"), this gets added to `run_daily.ps1`.
+
 ## Rebuilding the database
 
 The database is derived, rebuildable state; the raw archive is the actual
@@ -133,14 +172,20 @@ pytest
 ## Layout
 
 ```
-fsa_pipeline/        shared library code (config, HTTP client, FHRS parsing, archive writer, db)
+fsa_pipeline/        shared library code (config, HTTP client, FHRS + Companies House
+                        parsing, archive writer, db)
 scripts/              entry-point scripts: collect_fhrs_bulk.py, parse_fhrs_bulk.py,
-                        diff_fhrs.py, rebuild_db.py, run_daily.ps1 (scheduled task entry point)
+                        diff_fhrs.py, collect_companies_house.py, parse_companies_house.py,
+                        rebuild_db.py, run_daily.ps1 (scheduled task entry point)
 raw/                  raw archive, gitignored — this is the asset, back it up separately
   fhrs/<date>/        one dated directory per collection run
     _authorities-index.xml.gz   that day's local-authority list, as returned by the API
     _manifest.json               per-run summary: counts, and any authorities that failed
     <code>_<name>.xml.gz         one gzip-compressed raw bulk XML file per authority
+  companies-house/<date>/   one dated directory per Companies House collection run
+    _query.json                  the exact sic_codes/date-range parameters requested
+    _manifest.json               per-run summary: hits, pages, failures
+    page_NNNN.json.gz            one gzip-compressed raw Advanced Search response page
 logs/                 per-run logs, gitignored
 config.toml           non-secret configuration (URLs, timeouts, contact email)
 fsa_pipeline.db        SQLite database, gitignored (this is derived state -- rebuildable
@@ -231,6 +276,28 @@ fsa_pipeline.db        SQLite database, gitignored (this is derived state -- reb
 - **Address lines are independently sparse.** A record can have
   `AddressLine1`, `AddressLine3` and `AddressLine4` but no `AddressLine2`
   -- the parser never assumes a subset is present.
+- **Companies House: Advanced Search over the Streaming API.** Investigated
+  both, as the brief asked. The Streaming API (`stream.companieshouse.gov.uk`)
+  pushes every company change nationwide with no server-side SIC-code
+  filter -- using it here would mean consuming the whole UK company
+  firehose and discarding almost all of it client-side, plus building
+  connection/resumption/checkpoint handling for a project whose cadence is
+  daily, not sub-minute. The REST Advanced Search endpoint takes
+  `sic_codes` and `incorporated_from`/`incorporated_to` as direct query
+  parameters -- filtering happens server-side, fits the daily-batch
+  pattern already built for FHRS, and (bonus, found while investigating)
+  its response includes `sic_codes` per company where the older basic
+  `/search/companies` endpoint doesn't. Confirmed with the user 2026-08-24.
+- **Companies House parser is unverified against a live response** -- the
+  one exception to this project's "inspect real responses before writing
+  parsers" rule so far. No API key was available while building this
+  (registering for one is account creation, which is the user's to do,
+  not something to do on their behalf). The response schema and field
+  names are cross-checked against Companies House's own developer
+  documentation, not just assumed, but "documented" isn't "observed" --
+  flagged clearly in `fsa_pipeline/companies_house.py` and here so this
+  gap doesn't get silently forgotten. First real run should double-check
+  address-field sparseness and the exact shape of `sic_codes`.
 
 ## Data licensing
 

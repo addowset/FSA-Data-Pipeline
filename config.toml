@@ -10,6 +10,29 @@ backoff_factor = 2.0
 [database]
 path = "fsa_pipeline.db"
 
+[companies_house]
+# API key comes from the COMPANIES_HOUSE_API_KEY environment variable,
+# never from this file. Auth is HTTP Basic with the key as username and
+# a blank password -- verified against developer.company-information
+# .service.gov.uk/authentication, not assumed.
+advanced_search_url = "https://api.company-information.service.gov.uk/advanced-search/companies"
+raw_dir = "raw/companies-house"
+# Division 56 (food and beverage service activities), confirmed against
+# Companies House's own SIC code usage, and against the brief with the
+# user on 2026-08-24 (56301 "Licensed clubs" included as drink-serving,
+# even though it's nightlife-adjacent rather than food service).
+sic_codes = ["56101", "56102", "56103", "56210", "56290", "56301", "56302"]
+# Rolling trailing window re-fetched every day (like FHRS's daily bulk
+# re-fetch) rather than a strict single-day cutoff, to absorb any
+# indexing lag between a company's incorporation and it becoming
+# searchable -- the same lesson FHRS's ExtractDate lag already taught us.
+incorporated_window_days = 14
+page_size = 500
+request_delay_seconds = 0.5
+timeout_seconds = 30
+max_retries = 5
+backoff_factor = 2.0
+
 [diffing]
 # Bulk-reupload guard for INSERT spikes. Provisional first-pass numbers,
 # calibrated only against 4 real days of national data (per-authority daily

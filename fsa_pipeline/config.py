@@ -26,6 +26,15 @@ class Config:
     reupload_absolute_threshold: int
     reupload_min_history_days: int
     median_window_days: int
+    ch_advanced_search_url: str
+    ch_raw_dir: Path
+    ch_sic_codes: list[str]
+    ch_incorporated_window_days: int
+    ch_page_size: int
+    ch_request_delay_seconds: float
+    ch_timeout_seconds: float
+    ch_max_retries: int
+    ch_backoff_factor: float
 
     @property
     def user_agent(self) -> str:
@@ -40,6 +49,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     contact = raw["contact"]
     database = raw["database"]
     diffing = raw["diffing"]
+    companies_house = raw["companies_house"]
 
     return Config(
         authorities_url=fhrs["authorities_url"],
@@ -56,4 +66,13 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         reupload_absolute_threshold=int(diffing["reupload_absolute_threshold"]),
         reupload_min_history_days=int(diffing["reupload_min_history_days"]),
         median_window_days=int(diffing["median_window_days"]),
+        ch_advanced_search_url=companies_house["advanced_search_url"],
+        ch_raw_dir=PROJECT_ROOT / companies_house["raw_dir"],
+        ch_sic_codes=list(companies_house["sic_codes"]),
+        ch_incorporated_window_days=int(companies_house["incorporated_window_days"]),
+        ch_page_size=int(companies_house["page_size"]),
+        ch_request_delay_seconds=float(companies_house["request_delay_seconds"]),
+        ch_timeout_seconds=float(companies_house["timeout_seconds"]),
+        ch_max_retries=int(companies_house["max_retries"]),
+        ch_backoff_factor=float(companies_house["backoff_factor"]),
     )

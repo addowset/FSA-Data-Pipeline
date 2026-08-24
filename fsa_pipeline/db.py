@@ -28,6 +28,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+from fsa_pipeline.companies_house import compute_company_fingerprint
 from fsa_pipeline.fhrs_bulk import Authority
 from fsa_pipeline.fhrs_parse import compute_fingerprint
 
@@ -147,6 +148,67 @@ CREATE TABLE IF NOT EXISTS diff_events (
 CREATE INDEX IF NOT EXISTS idx_diff_events_authority_date
     ON diff_events(authority_code, collection_date);
 CREATE INDEX IF NOT EXISTS idx_diff_events_fhrsid ON diff_events(fhrsid);
+
+-- Companies House data. Same dedup-on-write pattern as the FHRS tables
+-- above: companies_current holds latest known values per company_number,
+-- company_observations is an immutable append-only log of first-seen/
+-- changed events. See fsa_pipeline/companies_house.py for field
+-- provenance and verification notes.
+CREATE TABLE IF NOT EXISTS companies_current (
+    company_number TEXT PRIMARY KEY,
+    company_name TEXT,
+    company_status TEXT,
+    company_subtype TEXT,
+    company_type TEXT,
+    date_of_creation TEXT,
+    date_of_cessation TEXT,
+    address_line_1 TEXT,
+    address_line_2 TEXT,
+    locality TEXT,
+    region TEXT,
+    postal_code TEXT,
+    country TEXT,
+    sic_codes TEXT,
+    fingerprint TEXT NOT NULL,
+    first_seen_date TEXT NOT NULL,
+    last_seen_date TEXT NOT NULL,
+    last_changed_date TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_companies_current_postal_code ON companies_current(postal_code);
+
+CREATE TABLE IF NOT EXISTS company_observations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_number TEXT NOT NULL,
+    collection_date TEXT NOT NULL,
+    change_type TEXT NOT NULL,
+    company_name TEXT,
+    company_status TEXT,
+    company_subtype TEXT,
+    company_type TEXT,
+    date_of_creation TEXT,
+    date_of_cessation TEXT,
+    address_line_1 TEXT,
+    address_line_2 TEXT,
+    locality TEXT,
+    region TEXT,
+    postal_code TEXT,
+    country TEXT,
+    sic_codes TEXT,
+    fingerprint TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_company_observations_company_number
+    ON company_observations(company_number);
+
+CREATE TABLE IF NOT EXISTS companies_house_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    collection_date TEXT NOT NULL UNIQUE,
+    hits INTEGER,
+    pages_parsed INTEGER,
+    status TEXT NOT NULL,
+    skipped_records INTEGER NOT NULL DEFAULT 0,
+    error_message TEXT,
+    parsed_at TEXT NOT NULL
+);
 """
 
 _CURRENT_COLUMNS = (
@@ -323,6 +385,124 @@ def ingest_establishments(
             INSERT INTO observations
                 (fhrsid, authority_code, collection_date, change_type, {col_list}, fingerprint)
             VALUES (?, ?, ?, ?, {placeholders}, ?)
+            """,
+            to_insert_observations,
+        )
+
+    conn.commit()
+    return stats
+
+
+_COMPANY_CURRENT_COLUMNS = (
+    "company_name", "company_status", "company_subtype", "company_type",
+    "date_of_creation", "date_of_cessation",
+    "address_line_1", "address_line_2", "locality", "region", "postal_code", "country",
+    "sic_codes",
+)
+
+
+def already_parsed_companies_house(conn: sqlite3.Connection, collection_date: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM companies_house_runs WHERE collection_date = ? AND status = 'ok'",
+        (collection_date,),
+    ).fetchone()
+    return row is not None
+
+
+def record_companies_house_run(
+    conn: sqlite3.Connection,
+    *,
+    collection_date: str,
+    hits: int | None,
+    pages_parsed: int | None,
+    status: str,
+    skipped_records: int = 0,
+    error_message: str | None = None,
+    parsed_at: str,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO companies_house_runs (collection_date, hits, pages_parsed, status, skipped_records, error_message, parsed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(collection_date) DO UPDATE SET
+            hits = excluded.hits,
+            pages_parsed = excluded.pages_parsed,
+            status = excluded.status,
+            skipped_records = excluded.skipped_records,
+            error_message = excluded.error_message,
+            parsed_at = excluded.parsed_at
+        """,
+        (collection_date, hits, pages_parsed, status, skipped_records, error_message, parsed_at),
+    )
+    conn.commit()
+
+
+def ingest_companies(conn: sqlite3.Connection, collection_date: str, companies: list[dict]) -> IngestStats:
+    """Same dedup-on-write pattern as ingest_establishments -- see db.py
+    module docstring and fsa_pipeline/companies_house.py."""
+    stats = IngestStats()
+
+    existing = dict(conn.execute("SELECT company_number, fingerprint FROM companies_current").fetchall())
+
+    to_insert_current = []
+    to_update_current = []
+    to_touch_last_seen = []
+    to_insert_observations = []
+
+    for company in companies:
+        company_number = company["company_number"]
+        fingerprint = compute_company_fingerprint(company)
+        values = tuple(company[c] for c in _COMPANY_CURRENT_COLUMNS)
+
+        if company_number not in existing:
+            stats.first_seen += 1
+            to_insert_current.append((company_number, *values, fingerprint,
+                                       collection_date, collection_date, collection_date))
+            to_insert_observations.append((company_number, collection_date, "first_seen", *values, fingerprint))
+        elif existing[company_number] != fingerprint:
+            stats.changed += 1
+            to_update_current.append((*values, fingerprint, collection_date, collection_date, company_number))
+            to_insert_observations.append((company_number, collection_date, "field_changed", *values, fingerprint))
+        else:
+            stats.unchanged += 1
+            to_touch_last_seen.append((collection_date, company_number))
+
+    col_list = ", ".join(_COMPANY_CURRENT_COLUMNS)
+    placeholders = ", ".join("?" * len(_COMPANY_CURRENT_COLUMNS))
+
+    if to_insert_current:
+        conn.executemany(
+            f"""
+            INSERT INTO companies_current
+                (company_number, {col_list}, fingerprint, first_seen_date, last_seen_date, last_changed_date)
+            VALUES (?, {placeholders}, ?, ?, ?, ?)
+            """,
+            to_insert_current,
+        )
+
+    if to_update_current:
+        set_clause = ", ".join(f"{c} = ?" for c in _COMPANY_CURRENT_COLUMNS)
+        conn.executemany(
+            f"""
+            UPDATE companies_current
+            SET {set_clause}, fingerprint = ?, last_seen_date = ?, last_changed_date = ?
+            WHERE company_number = ?
+            """,
+            to_update_current,
+        )
+
+    if to_touch_last_seen:
+        conn.executemany(
+            "UPDATE companies_current SET last_seen_date = ? WHERE company_number = ?",
+            to_touch_last_seen,
+        )
+
+    if to_insert_observations:
+        conn.executemany(
+            f"""
+            INSERT INTO company_observations
+                (company_number, collection_date, change_type, {col_list}, fingerprint)
+            VALUES (?, ?, ?, {placeholders}, ?)
             """,
             to_insert_observations,
         )
