@@ -2,12 +2,31 @@
 
 from __future__ import annotations
 
+import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = PROJECT_ROOT / "config.toml"
+DOTENV_PATH = PROJECT_ROOT / ".env"
+
+
+def load_dotenv(path: Path = DOTENV_PATH) -> None:
+    """Loads KEY=VALUE lines from .env into the environment, for secrets
+    like COMPANIES_HOUSE_API_KEY. Never overwrites a variable already set
+    in the real environment -- .env is a local convenience, not an
+    override. Silently does nothing if the file doesn't exist (most
+    developers running this project won't have one)."""
+    if not path.exists():
+        return
+
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
 @dataclass(frozen=True)
@@ -42,6 +61,8 @@ class Config:
 
 
 def load_config(path: Path = CONFIG_PATH) -> Config:
+    load_dotenv()
+
     with open(path, "rb") as f:
         raw = tomllib.load(f)
 

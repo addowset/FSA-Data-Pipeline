@@ -9,7 +9,7 @@ Full project brief: [CLAUDE.md](CLAUDE.md). Build proceeds in stages; see
 
 ## Status
 
-**Stages 1-3 of 7 done. Stage 4 (Companies House) built, pending live verification.**
+**Stage 4 (collection half) of 7 done and live-verified.**
 
 Stage 1 — fetches the FHRS local-authority index and all 363 authorities'
 bulk XML files daily, archives every response unmodified (gzip-compressed)
@@ -53,15 +53,23 @@ user 2026-08-24) via Companies House's Advanced Search REST endpoint
 trailing window re-fetched daily, same raw-archive-then-parse pattern as
 FHRS (`raw/companies-house/<date>/page_NNNN.json.gz`, gzip, never
 overwritten; `companies_current`/`company_observations` derived tables in
-the same database). **Not yet live-verified**: no Companies House API key
-was available while building this, so the parser is built against the
-documented response schema (cross-checked against Companies House's own
-developer docs, not just community write-ups) rather than an inspected
-real response — unlike every other data source in this project so far.
-13 tests pass against documentation-derived fixtures. **Not wired into
-`run_daily.ps1`** yet, deliberately — it would fail every day until a key
-is supplied. See "Running Companies House collection" below for what's
-needed to finish verifying this.
+the same database). **Live-verified 2026-08-24**: first real run
+returned 1,993 companies across 4 pages, 0 collection failures, 0 parse
+errors — the documentation-derived parser matched the real schema
+exactly. Field presence measured across all 1,993 real records:
+`company_name`/`company_number`/`company_status`/`company_type`/
+`date_of_creation`/`registered_office_address`/`sic_codes` always
+present; `date_of_cessation` never present (expected — these are fresh
+incorporations); `company_subtype` in only 0.6%; within the address,
+`address_line_1`/`locality`/`postal_code` present ~100%, `address_line_2`
+in 32%, `region` in only 12% — same sparse-field pattern already seen in
+FHRS. Confirmed the SIC filter is an "any code matches" filter, not
+"primary code only" — companies come back with hospitality codes mixed
+among several unrelated ones (e.g. a company coded primarily as "Hotels
+and similar accommodation" that also carries 56101), which the matcher
+will need to keep in mind. 17 tests pass, including the `.env` loader
+(secrets in a local gitignored file, never a system environment
+variable, never committed).
 
 Not yet built: the matcher (name similarity + postcode district, the
 "hard part" per the brief) and classification, live-API collection for
@@ -131,14 +139,8 @@ so it's skipped with no events emitted (not treated as a mass INSERT).
 
 ## Running Companies House collection
 
-Not yet part of the daily scheduled run. To finish verifying this stage:
-
-1. Register for a free API key at
-   [developer.company-information.service.gov.uk](https://developer.company-information.service.gov.uk)
-   (I can't do this step — it's account creation).
-2. Set it as an environment variable: `$env:COMPANIES_HOUSE_API_KEY = "..."`
-   (PowerShell) — never commit it.
-3. Run collection, then parsing:
+Part of the daily scheduled run (`run_daily.ps1`) as of 2026-08-24. To
+run manually:
 
 ```bash
 python scripts/collect_companies_house.py
@@ -146,9 +148,10 @@ python scripts/parse_companies_house.py
 ```
 
 Writes to `raw/companies-house/<today>/` and logs to
-`logs/companies_house_collect_<date>.log` /
-`..._parse_<date>.log`. Once a real response confirms the documented
-schema (see "Design notes"), this gets added to `run_daily.ps1`.
+`logs/companies_house_collect_<date>.log` / `..._parse_<date>.log`.
+Needs `COMPANIES_HOUSE_API_KEY` — set in the local `.env` file (see
+"Design notes"; register for a free key at
+[developer.company-information.service.gov.uk](https://developer.company-information.service.gov.uk)).
 
 ## Rebuilding the database
 
@@ -288,16 +291,21 @@ fsa_pipeline.db        SQLite database, gitignored (this is derived state -- reb
   pattern already built for FHRS, and (bonus, found while investigating)
   its response includes `sic_codes` per company where the older basic
   `/search/companies` endpoint doesn't. Confirmed with the user 2026-08-24.
-- **Companies House parser is unverified against a live response** -- the
-  one exception to this project's "inspect real responses before writing
-  parsers" rule so far. No API key was available while building this
-  (registering for one is account creation, which is the user's to do,
-  not something to do on their behalf). The response schema and field
-  names are cross-checked against Companies House's own developer
-  documentation, not just assumed, but "documented" isn't "observed" --
-  flagged clearly in `fsa_pipeline/companies_house.py` and here so this
-  gap doesn't get silently forgotten. First real run should double-check
-  address-field sparseness and the exact shape of `sic_codes`.
+- **Companies House parser was built from documentation, then verified
+  live once a key was available** (2026-08-24) -- briefly the one
+  exception to this project's "inspect real responses before writing
+  parsers" rule, since registering for an API key is account creation
+  and not something to do on the user's behalf. First real run: 1,993
+  companies, 0 parse errors, schema matched exactly. See "Status" above
+  for the measured field-presence rates.
+- **Secrets live in a local `.env` file, not a system environment
+  variable.** `fsa_pipeline/config.py`'s `load_dotenv()` reads `.env` at
+  the project root (gitignored) and only sets a variable if it isn't
+  already in the real environment, so an explicit `$env:VAR=...` always
+  wins. Chosen over `[Environment]::SetEnvironmentVariable(...,"User")`
+  to keep the secret fully contained to the project directory --
+  deleting the repo removes it, no leftover machine-wide state to clean
+  up later.
 
 ## Data licensing
 
