@@ -21,6 +21,11 @@ class Config:
     backoff_factor: float
     contact_email: str
     db_path: Path
+    reupload_ratio_threshold: float
+    reupload_ratio_min_floor: int
+    reupload_absolute_threshold: int
+    reupload_min_history_days: int
+    median_window_days: int
 
     @property
     def user_agent(self) -> str:
@@ -34,6 +39,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     fhrs = raw["fhrs"]
     contact = raw["contact"]
     database = raw["database"]
+    diffing = raw["diffing"]
 
     return Config(
         authorities_url=fhrs["authorities_url"],
@@ -45,4 +51,9 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         backoff_factor=float(fhrs["backoff_factor"]),
         contact_email=contact["email"],
         db_path=PROJECT_ROOT / database["path"],
+        reupload_ratio_threshold=float(diffing["reupload_ratio_threshold"]),
+        reupload_ratio_min_floor=int(diffing["reupload_ratio_min_floor"]),
+        reupload_absolute_threshold=int(diffing["reupload_absolute_threshold"]),
+        reupload_min_history_days=int(diffing["reupload_min_history_days"]),
+        median_window_days=int(diffing["median_window_days"]),
     )

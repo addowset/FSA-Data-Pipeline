@@ -9,7 +9,7 @@ a bug in the parsing/fingerprint logic that corrupted derived state
 without touching the raw archive.
 
 Replays every dated directory under raw/fhrs/ through parse_fhrs_bulk.py,
-in date order, against a freshly emptied database.
+then diff_fhrs.py, in date order, against a freshly emptied database.
 
 Usage:
     python scripts/rebuild_db.py
@@ -38,6 +38,8 @@ def main() -> None:
     print(f"wiping {config.db_path}")
     conn = db.connect(config.db_path)
     conn.executescript(
+        "DROP TABLE IF EXISTS diff_events;"
+        "DROP TABLE IF EXISTS diff_runs;"
         "DROP TABLE IF EXISTS observations;"
         "DROP TABLE IF EXISTS establishments_current;"
         "DROP TABLE IF EXISTS collection_runs;"
@@ -49,14 +51,31 @@ def main() -> None:
 
     print(f"replaying {len(dates)} day(s): {', '.join(dates)}")
     python = sys.executable
+    scripts_dir = Path(__file__).parent
+    project_root = scripts_dir.parent
+
     for date_str in dates:
-        print(f"--- {date_str} ---")
+        print(f"--- parse {date_str} ---")
         result = subprocess.run(
-            [python, str(Path(__file__).parent / "parse_fhrs_bulk.py"), "--date", date_str],
-            cwd=str(Path(__file__).parent.parent),
+            [python, str(scripts_dir / "parse_fhrs_bulk.py"), "--date", date_str],
+            cwd=str(project_root),
         )
         if result.returncode != 0:
             print(f"parse failed for {date_str}, aborting rebuild")
+            sys.exit(1)
+
+    # Diffing must run in date order too, and only after every day is
+    # parsed -- the bulk-reupload guard looks at each authority's trailing
+    # history of prior diff_runs, so this has to be a second full pass,
+    # not interleaved with the parse loop above.
+    for date_str in dates:
+        print(f"--- diff {date_str} ---")
+        result = subprocess.run(
+            [python, str(scripts_dir / "diff_fhrs.py"), "--date", date_str],
+            cwd=str(project_root),
+        )
+        if result.returncode != 0:
+            print(f"diff failed for {date_str}, aborting rebuild")
             sys.exit(1)
 
     print("rebuild complete")

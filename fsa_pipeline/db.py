@@ -121,6 +121,32 @@ CREATE TABLE IF NOT EXISTS observations (
 CREATE INDEX IF NOT EXISTS idx_observations_fhrsid ON observations(fhrsid);
 CREATE INDEX IF NOT EXISTS idx_observations_authority_date
     ON observations(authority_code, collection_date);
+
+CREATE TABLE IF NOT EXISTS diff_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    authority_code TEXT NOT NULL,
+    collection_date TEXT NOT NULL,
+    previous_collection_date TEXT,
+    insert_count INTEGER NOT NULL,
+    update_count INTEGER NOT NULL,
+    delete_count INTEGER NOT NULL,
+    quarantined INTEGER NOT NULL DEFAULT 0,
+    quarantine_reason TEXT,
+    computed_at TEXT NOT NULL,
+    UNIQUE(authority_code, collection_date)
+);
+
+CREATE TABLE IF NOT EXISTS diff_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    authority_code TEXT NOT NULL,
+    collection_date TEXT NOT NULL,
+    fhrsid INTEGER NOT NULL,
+    event_type TEXT NOT NULL,
+    quarantined INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_diff_events_authority_date
+    ON diff_events(authority_code, collection_date);
+CREATE INDEX IF NOT EXISTS idx_diff_events_fhrsid ON diff_events(fhrsid);
 """
 
 _CURRENT_COLUMNS = (

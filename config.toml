@@ -10,6 +10,18 @@ backoff_factor = 2.0
 [database]
 path = "fsa_pipeline.db"
 
+[diffing]
+# Bulk-reupload guard for INSERT spikes. Provisional first-pass numbers,
+# calibrated only against 4 real days of national data (per-authority daily
+# INSERT count: median 5, max 58, p95 24 -- no actual bulk-reupload event
+# has been observed yet to calibrate against). Revisit once more history
+# accumulates or a real spike is seen. See fsa_pipeline/diff_engine.py.
+reupload_ratio_threshold = 3.0
+reupload_ratio_min_floor = 10
+reupload_absolute_threshold = 150
+reupload_min_history_days = 5
+median_window_days = 28
+
 [contact]
 # Used in the User-Agent header sent with every request, per FSA's request
 # for an honest, identifiable client. Not a secret.

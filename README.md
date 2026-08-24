@@ -9,7 +9,7 @@ Full project brief: [CLAUDE.md](CLAUDE.md). Build proceeds in stages; see
 
 ## Status
 
-**Stage 1 (raw archive) and stage 2 (parsing/storage) of 7: done.**
+**Stages 1-3 of 7 (raw archive, parsing/storage, diffing) done.**
 
 Stage 1 — fetches the FHRS local-authority index and all 363 authorities'
 bulk XML files daily, archives every response unmodified (gzip-compressed)
@@ -29,9 +29,25 @@ hundred to ~1,500 `field_changed` per day, 0 collection/parse failures.
 `ExtractDate`s observed ranging from the same day back to **2026-04-22**
 for one authority — real evidence of the lag your brief flagged.
 
-Not yet built: live-API collection for priority authorities, the diff
-engine (INSERT/UPDATE/DELETE classification + bulk-reupload guard),
-Companies House matching, classification, metrics/monitoring, CSV export.
+Stage 3 — classifies each day's per-authority changes into `diff_events`
+(INSERT/UPDATE/DELETE), reading only from the database (never re-touches
+raw files). INSERT = `first_seen` on a day that isn't an authority's
+bootstrap day (an authority's very first successful collection has no
+prior snapshot to diff against, so it emits no events at all — otherwise
+day one would look like 611,596 new registrations). UPDATE = `field_changed`.
+DELETE = an establishment present in the previous successful run that
+didn't get touched today. Includes the bulk-reupload guard from the brief:
+an authority's INSERTs get quarantined (flagged, not discarded) if they
+exceed an absolute threshold or a multiple of the authority's trailing
+median. Run against all 5 real days so far: 887 INSERT / 2,958 UPDATE /
+825 DELETE nationally, every per-day sum reconciling exactly against
+stage 2's independently-computed `first_seen`/`field_changed` counts, 0
+quarantines triggered (real max seen so far is 58/authority/day, well
+under the 150 threshold). See "Design notes" for how the threshold
+numbers were chosen and their current limitations.
+
+Not yet built: live-API collection for priority authorities, Companies
+House matching, classification, metrics/monitoring, CSV export.
 
 ## Setup
 
@@ -82,18 +98,31 @@ Reads `raw/fhrs/<today>/`, never touches the network. Idempotent: an
 authority already parsed for that date is skipped, so a partial/failed run
 can be re-run safely. Exits non-zero if any authority failed to parse.
 
+## Running the daily diff
+
+After parsing, classify that day's changes:
+
+```bash
+python scripts/diff_fhrs.py
+```
+
+Reads only from the database, never touches raw files or the network.
+Idempotent, same resume behaviour as the other scripts. An authority's
+first-ever successful collection has no prior snapshot to diff against,
+so it's skipped with no events emitted (not treated as a mass INSERT).
+
 ## Rebuilding the database
 
 The database is derived, rebuildable state; the raw archive is the actual
 asset. To reprocess all history from scratch (after a parser/fingerprint
-change, or to recover from a bug in the parsing logic):
+change, or to recover from a bug in the parsing/diffing logic):
 
 ```bash
 python scripts/rebuild_db.py
 ```
 
 Wipes `fsa_pipeline.db` and replays every dated directory under
-`raw/fhrs/` through `parse_fhrs_bulk.py`, in order.
+`raw/fhrs/` through `parse_fhrs_bulk.py`, then `diff_fhrs.py`, in order.
 
 ## Running tests
 
@@ -106,7 +135,7 @@ pytest
 ```
 fsa_pipeline/        shared library code (config, HTTP client, FHRS parsing, archive writer, db)
 scripts/              entry-point scripts: collect_fhrs_bulk.py, parse_fhrs_bulk.py,
-                        rebuild_db.py, run_daily.ps1 (scheduled task entry point)
+                        diff_fhrs.py, rebuild_db.py, run_daily.ps1 (scheduled task entry point)
 raw/                  raw archive, gitignored — this is the asset, back it up separately
   fhrs/<date>/        one dated directory per collection run
     _authorities-index.xml.gz   that day's local-authority list, as returned by the API
@@ -168,6 +197,28 @@ fsa_pipeline.db        SQLite database, gitignored (this is derived state -- reb
   when parsing logic changes. Lesson: any future change to
   `_FINGERPRINT_FIELDS` needs either a fingerprint backfill migration or a
   full rebuild before the next scheduled run, not after.
+- **An authority's bootstrap day emits no diff events.** Diffing needs a
+  previous snapshot; the first successful collection for an authority has
+  none. `compute_diff_for_authority` looks up the authority's previous
+  *successful* `collection_runs` date (skipping over any failed days, so a
+  gap in collection doesn't get misread as mass churn) and returns early
+  with zero counts if there isn't one.
+- **The bulk-reupload guard only fires on real evidence so far, not a
+  calibrated threshold.** The brief asks for "more than 3x trailing
+  median, or more than some absolute threshold" without specifying the
+  numbers. Current defaults (`config.toml`): absolute threshold 150,
+  ratio 3x, but the ratio only applies once an authority has
+  `reupload_min_history_days` (5) days of prior `diff_runs` history *and*
+  today's INSERT count is at least `reupload_ratio_min_floor` (10) — below
+  that floor a ratio is noise (an authority jumping from 0 to 4 new
+  registrations is trivially normal, not a bulk re-upload). These numbers
+  are reasoned from real data (per-authority daily INSERT count across 4
+  real days: median 5, max 58, p95 24) but **no actual bulk-reupload event
+  has been observed yet** to calibrate against — revisit once one occurs,
+  or once more history accumulates. A quarantined day's INSERT events are
+  still recorded in `diff_events` (`quarantined=1`), never discarded, per
+  "never lose data" — they're just excluded from whatever stage 5+
+  eventually treats as customer-facing signal.
 - **FHRS is not one rating scheme.** England/Wales/NI use FHRS (numeric
   0-5, or `AwaitingInspection`/`AwaitingPublication`/`Exempt`). Scotland
   uses FHIS, an entirely different vocabulary (`Pass`, `Improvement
