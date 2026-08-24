@@ -1,0 +1,16 @@
+[fhrs]
+authorities_url = "https://api1-ratings.food.gov.uk/authorities/xml"
+raw_dir = "raw/fhrs"
+log_dir = "logs"
+request_delay_seconds = 0.5
+timeout_seconds = 60
+max_retries = 5
+backoff_factor = 2.0
+
+[database]
+path = "fsa_pipeline.db"
+
+[contact]
+# Used in the User-Agent header sent with every request, per FSA's request
+# for an honest, identifiable client. Not a secret.
+email = "andydowsett@hotmail.com"

@@ -1,0 +1,10 @@
+raw/
+logs/
+*.db
+*.db-wal
+*.db-shm
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
