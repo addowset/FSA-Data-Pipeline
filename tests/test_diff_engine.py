@@ -33,6 +33,8 @@ def make_config(**overrides) -> Config:
         ch_timeout_seconds=1.0,
         ch_max_retries=1,
         ch_backoff_factor=1.0,
+        high_density_address_threshold=5,
+        candidates_per_match=5,
     )
     return dataclasses.replace(base, **overrides)
 

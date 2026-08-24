@@ -1,12 +1,13 @@
 # Daily FHRS collection + parse + diff, then Companies House collection +
-# parse, run together as the scheduled task's entry point. Runs each stage
-# regardless of whether an earlier one had partial failures -- each script
-# is idempotent and only processes what it can (an authority with a raw
-# file gets parsed even if others failed; an authority that got parsed
-# gets diffed even if others didn't), so a partial run still makes
-# progress, and the next day's run (or a manual re-run) picks up the rest
-# via each script's own resume logic. The two data sources don't depend
-# on each other, but FHRS runs first since it's the higher-priority feed.
+# parse, then the matcher, run together as the scheduled task's entry
+# point. Runs each stage regardless of whether an earlier one had partial
+# failures -- each script is idempotent and only processes what it can
+# (an authority with a raw file gets parsed even if others failed; an
+# authority that got parsed gets diffed even if others didn't), so a
+# partial run still makes progress, and the next day's run (or a manual
+# re-run) picks up the rest via each script's own resume logic. Matching
+# runs last since it depends on both FHRS's diff_events and Companies
+# House's companies_current.
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
@@ -27,8 +28,11 @@ $chCollectExit = $LASTEXITCODE
 & $python (Join-Path $root "scripts\parse_companies_house.py")
 $chParseExit = $LASTEXITCODE
 
-if ($collectExit -ne 0 -or $parseExit -ne 0 -or $diffExit -ne 0 -or $chCollectExit -ne 0 -or $chParseExit -ne 0) {
-    Write-Error "run_daily.ps1: fhrs collect=$collectExit parse=$parseExit diff=$diffExit / ch collect=$chCollectExit parse=$chParseExit"
+& $python (Join-Path $root "scripts\match_companies_house.py")
+$matchExit = $LASTEXITCODE
+
+if ($collectExit -ne 0 -or $parseExit -ne 0 -or $diffExit -ne 0 -or $chCollectExit -ne 0 -or $chParseExit -ne 0 -or $matchExit -ne 0) {
+    Write-Error "run_daily.ps1: fhrs collect=$collectExit parse=$parseExit diff=$diffExit / ch collect=$chCollectExit parse=$chParseExit / match=$matchExit"
     exit 1
 }
 

@@ -9,7 +9,7 @@ Full project brief: [CLAUDE.md](CLAUDE.md). Build proceeds in stages; see
 
 ## Status
 
-**Stage 4 (collection half) of 7 done and live-verified.**
+**Stage 4 of 7 done and live-verified (collection and matcher).**
 
 Stage 1 — fetches the FHRS local-authority index and all 363 authorities'
 bulk XML files daily, archives every response unmodified (gzip-compressed)
@@ -71,9 +71,31 @@ will need to keep in mind. 17 tests pass, including the `.env` loader
 (secrets in a local gitignored file, never a system environment
 variable, never committed).
 
-Not yet built: the matcher (name similarity + postcode district, the
-"hard part" per the brief) and classification, live-API collection for
-priority FHRS authorities, metrics/monitoring, CSV export.
+Stage 4 (matcher half) — for each FHRS INSERT event, finds candidate
+Companies House matches: company name similarity (normalized, legal
+suffixes like LTD/LIMITED/LLP stripped) among companies in the *same
+postcode district* (the outward code, e.g. "NG17" — deliberately not
+full address, per the brief's explicit warning against matching on
+address equality). Address density (how many companies share a
+registered office) is computed and stored as evidence, not used to gate
+matching — a candidate can still be the right match at a high-density
+address, it just gets flagged so stage 5 can discount an address-based
+signal there. Doesn't decide NEW_VENUE/OWNERSHIP_CHANGE/UNKNOWN itself —
+that's stage 5, consuming this evidence. Run against all 887 real INSERT
+events collected so far: 339 (38%) found at least one same-district
+candidate; **3 exact name matches** (e.g. "The Cotswold Cafe" ↔ "THE
+COTSWOLD CAFE LIMITED", both incorporated/first-seen within the same
+window) plus a further 4 scoring 0.7-0.9 and 9 more at 0.5-0.7 — real,
+plausible new-venue signal. The other 62% found nothing in-district,
+consistent with the brief's own expectation that most independent cafés
+never incorporate. 31 real candidates got flagged for a high-density
+address, all at moderate-to-low name-similarity scores, not masquerading
+as strong matches. 20 new tests, all passing. See "Design notes" for the
+normalization approach and its known rough edges.
+
+Not yet built: classification (NEW_VENUE/OWNERSHIP_CHANGE/UNKNOWN +
+confidence + reason), live-API collection for priority FHRS authorities,
+metrics/monitoring, CSV export.
 
 ## Setup
 
@@ -153,18 +175,35 @@ Needs `COMPANIES_HOUSE_API_KEY` — set in the local `.env` file (see
 "Design notes"; register for a free key at
 [developer.company-information.service.gov.uk](https://developer.company-information.service.gov.uk)).
 
+## Running the matcher
+
+After diffing and Companies House parsing, find candidate matches for
+each FHRS INSERT event:
+
+```bash
+python scripts/match_companies_house.py
+```
+
+Reads only from the database, never touches raw files or the network.
+Idempotent per (FHRSID, INSERT date); pass `--force` to rematch
+everything (candidates can change as new Companies House data arrives —
+matching isn't a one-time fact the way an observation is).
+
 ## Rebuilding the database
 
 The database is derived, rebuildable state; the raw archive is the actual
 asset. To reprocess all history from scratch (after a parser/fingerprint
-change, or to recover from a bug in the parsing/diffing logic):
+change, or to recover from a bug in the parsing/diffing/matching logic):
 
 ```bash
 python scripts/rebuild_db.py
 ```
 
 Wipes `fsa_pipeline.db` and replays every dated directory under
-`raw/fhrs/` through `parse_fhrs_bulk.py`, then `diff_fhrs.py`, in order.
+`raw/fhrs/` through `parse_fhrs_bulk.py` then `diff_fhrs.py`, every dated
+directory under `raw/companies-house/` through `parse_companies_house.py`,
+then `match_companies_house.py` once at the end. Never touches the
+network.
 
 ## Running tests
 
@@ -179,7 +218,8 @@ fsa_pipeline/        shared library code (config, HTTP client, FHRS + Companies 
                         parsing, archive writer, db)
 scripts/              entry-point scripts: collect_fhrs_bulk.py, parse_fhrs_bulk.py,
                         diff_fhrs.py, collect_companies_house.py, parse_companies_house.py,
-                        rebuild_db.py, run_daily.ps1 (scheduled task entry point)
+                        match_companies_house.py, rebuild_db.py,
+                        run_daily.ps1 (scheduled task entry point)
 raw/                  raw archive, gitignored — this is the asset, back it up separately
   fhrs/<date>/        one dated directory per collection run
     _authorities-index.xml.gz   that day's local-authority list, as returned by the API
@@ -306,6 +346,26 @@ fsa_pipeline.db        SQLite database, gitignored (this is derived state -- reb
   to keep the secret fully contained to the project directory --
   deleting the repo removes it, no leftover machine-wide state to clean
   up later.
+- **Matching on postcode district + name similarity, never address
+  equality** -- the brief's explicit warning, confirmed necessary by real
+  data: one address (a known company-formation service) hosts 31 of our
+  1,993 companies, three addresses host 10+. Company names are normalized
+  (uppercased, legal suffixes like LTD/LIMITED/LLP stripped, punctuation
+  removed) before scoring with `difflib.SequenceMatcher` -- simple,
+  stdlib, no new dependency, and good enough to find 3 exact matches and
+  10 more at 0.5+ similarity out of 887 real INSERT events on first run.
+  Known rough edge: `SequenceMatcher` can give a misleadingly moderate
+  score to names that share a common word ("Group", "Catering") but
+  aren't the same business at all -- this is exactly why the matcher
+  stores ranked evidence with scores rather than a bare yes/no, leaving
+  the actual confidence judgement to stage 5.
+- **Address density is evidence, not a filter.** A candidate at a
+  high-density address isn't excluded or down-weighted in the matcher
+  itself -- it's flagged (`is_high_density_address`) so stage 5's
+  classification logic can discount an *address-based* signal there,
+  without discarding a genuinely strong *name* match that happens to
+  share a formation agent with other companies (plausible for a small
+  independent business that also outsources its accounts).
 
 ## Data licensing
 

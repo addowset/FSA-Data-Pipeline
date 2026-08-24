@@ -45,6 +45,18 @@ reupload_absolute_threshold = 150
 reupload_min_history_days = 5
 median_window_days = 28
 
+[matching]
+# Companies sharing a registered-office address with this many or more
+# other companies are flagged as a likely formation-agent/accountant
+# address (never used to gate matching itself -- see matcher.py -- only
+# stored as evidence for stage 5). Grounded in real data (2026-08-24):
+# median address sharing is 1 company, but 71-75 Shelton Street WC2H 9JQ
+# (a known company-formation address) hosts 31 of our 1,993 companies,
+# and 3 addresses host 10+. 5 sits clearly above the normal case.
+high_density_address_threshold = 5
+# How many ranked candidates to store as evidence per FHRS INSERT event.
+candidates_per_match = 5
+
 [contact]
 # Used in the User-Agent header sent with every request, per FSA's request
 # for an honest, identifiable client. Not a secret.

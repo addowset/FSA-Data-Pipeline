@@ -209,6 +209,38 @@ CREATE TABLE IF NOT EXISTS companies_house_runs (
     error_message TEXT,
     parsed_at TEXT NOT NULL
 );
+
+-- Matcher evidence (stage 4b). Derived/rebuildable, unlike observations/
+-- company_observations -- rerunning the matcher for a FHRSID replaces its
+-- prior candidates rather than appending to them, since a "match" is a
+-- computation over current data, not an observed fact. See
+-- fsa_pipeline/matcher.py for the matching approach and its reasoning.
+CREATE TABLE IF NOT EXISTS company_match_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fhrsid INTEGER NOT NULL,
+    authority_code TEXT NOT NULL,
+    insert_collection_date TEXT NOT NULL,
+    candidates_found INTEGER NOT NULL,
+    best_match_company_number TEXT,
+    best_match_score REAL,
+    matched_at TEXT NOT NULL,
+    UNIQUE(fhrsid, insert_collection_date)
+);
+
+CREATE TABLE IF NOT EXISTS company_match_candidates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fhrsid INTEGER NOT NULL,
+    insert_collection_date TEXT NOT NULL,
+    rank INTEGER NOT NULL,
+    company_number TEXT NOT NULL,
+    company_name TEXT NOT NULL,
+    name_similarity_score REAL NOT NULL,
+    postcode_district TEXT NOT NULL,
+    address_company_count INTEGER NOT NULL,
+    is_high_density_address INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_company_match_candidates_fhrsid
+    ON company_match_candidates(fhrsid, insert_collection_date);
 """
 
 _CURRENT_COLUMNS = (
@@ -509,3 +541,65 @@ def ingest_companies(conn: sqlite3.Connection, collection_date: str, companies: 
 
     conn.commit()
     return stats
+
+
+def already_matched(conn: sqlite3.Connection, fhrsid: int, insert_collection_date: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM company_match_runs WHERE fhrsid = ? AND insert_collection_date = ?",
+        (fhrsid, insert_collection_date),
+    ).fetchone()
+    return row is not None
+
+
+def record_match(
+    conn: sqlite3.Connection,
+    fhrsid: int,
+    authority_code: str,
+    insert_collection_date: str,
+    candidates: list,
+    matched_at: str,
+) -> None:
+    best = candidates[0] if candidates else None
+
+    conn.execute(
+        """
+        INSERT INTO company_match_runs
+            (fhrsid, authority_code, insert_collection_date, candidates_found,
+             best_match_company_number, best_match_score, matched_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(fhrsid, insert_collection_date) DO UPDATE SET
+            candidates_found = excluded.candidates_found,
+            best_match_company_number = excluded.best_match_company_number,
+            best_match_score = excluded.best_match_score,
+            matched_at = excluded.matched_at
+        """,
+        (
+            fhrsid, authority_code, insert_collection_date, len(candidates),
+            best.company_number if best else None,
+            best.name_similarity_score if best else None,
+            matched_at,
+        ),
+    )
+
+    conn.execute(
+        "DELETE FROM company_match_candidates WHERE fhrsid = ? AND insert_collection_date = ?",
+        (fhrsid, insert_collection_date),
+    )
+
+    if candidates:
+        conn.executemany(
+            """
+            INSERT INTO company_match_candidates
+                (fhrsid, insert_collection_date, rank, company_number, company_name,
+                 name_similarity_score, postcode_district, address_company_count, is_high_density_address)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (fhrsid, insert_collection_date, rank, c.company_number, c.company_name,
+                 c.name_similarity_score, c.postcode_district, c.address_company_count,
+                 int(c.is_high_density_address))
+                for rank, c in enumerate(candidates, start=1)
+            ],
+        )
+
+    conn.commit()

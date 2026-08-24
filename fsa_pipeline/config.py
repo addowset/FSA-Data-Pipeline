@@ -54,6 +54,8 @@ class Config:
     ch_timeout_seconds: float
     ch_max_retries: int
     ch_backoff_factor: float
+    high_density_address_threshold: int
+    candidates_per_match: int
 
     @property
     def user_agent(self) -> str:
@@ -71,6 +73,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     database = raw["database"]
     diffing = raw["diffing"]
     companies_house = raw["companies_house"]
+    matching = raw["matching"]
 
     return Config(
         authorities_url=fhrs["authorities_url"],
@@ -96,4 +99,6 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         ch_timeout_seconds=float(companies_house["timeout_seconds"]),
         ch_max_retries=int(companies_house["max_retries"]),
         ch_backoff_factor=float(companies_house["backoff_factor"]),
+        high_density_address_threshold=int(matching["high_density_address_threshold"]),
+        candidates_per_match=int(matching["candidates_per_match"]),
     )
