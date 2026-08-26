@@ -9,7 +9,8 @@ Full project brief: [CLAUDE.md](CLAUDE.md). Build proceeds in stages; see
 
 ## Status
 
-**Stage 4 of 7 done and live-verified (collection and matcher).**
+**Stage 4 of 7 done and live-verified (collection and matcher). Plus a
+supplementary postcode-backfill job, outside the staged build order.**
 
 Stage 1 — fetches the FHRS local-authority index and all 363 authorities'
 bulk XML files daily, archives every response unmodified (gzip-compressed)
@@ -92,6 +93,30 @@ never incorporate. 31 real candidates got flagged for a high-density
 address, all at moderate-to-low name-similarity scores, not masquerading
 as strong matches. 20 new tests, all passing. See "Design notes" for the
 normalization approach and its known rough edges.
+
+Postcode backfill (supplementary, outside the numbered build order) —
+investigated 2026-08-25/26 after the user asked whether the FHRS live
+Establishments API could replace bulk collection for stale authorities.
+It couldn't (see "Design notes" for the full investigation: identical
+FHRSIDs and ratings on every authority tested, so no evidence it
+surfaces new registrations or rating changes bulk misses), but it
+surfaced a bigger, unrelated problem: **17.10% of establishments
+nationally (104,798 of 612,974) had no postcode at all in bulk data**,
+uncorrelated with staleness. `scripts/backfill_postcodes.py` recovers
+what it can from the live API, storing it in a separate column
+(`postcode_from_live_api`) that never overwrites or gets overwritten by
+the bulk `post_code` column — see "Design notes" for why that separation
+matters. First real run (2026-08-26): 104,916 candidates across 360
+authorities, **93,745 resolved (89.4%)**, bringing the national
+unresolved rate down to 1.82% (11,171). Resolution rate varies sharply
+and specifically by council, not by scheme or region — e.g. Falkirk and
+the Western Isles resolved ~100%, while Aberdeen City, Edinburgh and
+Aberdeenshire resolved 0% (the postcode is genuinely missing from FSA's
+system for those councils via any access method, confirmed by testing
+the live API directly). 15 new tests, all passing. **Not wired into
+`run_daily.ps1`** — deliberately a separate, manually-run job for now;
+see "Running the postcode backfill" for how to run it and the scheduling
+question still open.
 
 Not yet built: classification (NEW_VENUE/OWNERSHIP_CHANGE/UNKNOWN +
 confidence + reason), live-API collection for priority FHRS authorities,
@@ -189,6 +214,23 @@ Idempotent per (FHRSID, INSERT date); pass `--force` to rematch
 everything (candidates can change as new Companies House data arrives —
 matching isn't a one-time fact the way an observation is).
 
+## Running the postcode backfill
+
+Not part of the daily scheduled run — a supplementary job, run manually
+or scheduled separately at whatever cadence you choose:
+
+```bash
+python scripts/backfill_postcodes.py
+```
+
+Only touches establishments with no postcode in bulk data, skipping any
+already checked within `postcode_recheck_after_days` (config.toml,
+default 30). Writes to `raw/fhrs-live/<today>/` and logs to
+`logs/backfill_postcodes_<date>.log`. Idempotent per (authority, day);
+pass `--force` to rerun. First run resolved 89.4% of the national gap —
+see "Status" above and "Design notes" below for the full numbers and why
+the live API only partially helps.
+
 ## Rebuilding the database
 
 The database is derived, rebuildable state; the raw archive is the actual
@@ -205,6 +247,13 @@ directory under `raw/companies-house/` through `parse_companies_house.py`,
 then `match_companies_house.py` once at the end. Never touches the
 network.
 
+**Does not replay postcode backfill** — wiping `establishments_current`
+resets `postcode_from_live_api`/`postcode_backfill_checked_at` to empty,
+since that table is dropped and rebuilt fresh. Run
+`python scripts/backfill_postcodes.py` again afterwards to restore it;
+it'll reuse the already-archived raw pages under `raw/fhrs-live/<today>/`
+rather than re-querying the API, provided that directory still exists.
+
 ## Running tests
 
 ```bash
@@ -218,7 +267,7 @@ fsa_pipeline/        shared library code (config, HTTP client, FHRS + Companies 
                         parsing, archive writer, db)
 scripts/              entry-point scripts: collect_fhrs_bulk.py, parse_fhrs_bulk.py,
                         diff_fhrs.py, collect_companies_house.py, parse_companies_house.py,
-                        match_companies_house.py, rebuild_db.py,
+                        match_companies_house.py, backfill_postcodes.py, rebuild_db.py,
                         run_daily.ps1 (scheduled task entry point)
 raw/                  raw archive, gitignored — this is the asset, back it up separately
   fhrs/<date>/        one dated directory per collection run
@@ -229,6 +278,8 @@ raw/                  raw archive, gitignored — this is the asset, back it up 
     _query.json                  the exact sic_codes/date-range parameters requested
     _manifest.json               per-run summary: hits, pages, failures
     page_NNNN.json.gz            one gzip-compressed raw Advanced Search response page
+  fhrs-live/<date>/   one dated directory per postcode-backfill run
+    <code>_page_NNNN.json.gz     one gzip-compressed raw live-API response page per authority
 logs/                 per-run logs, gitignored
 config.toml           non-secret configuration (URLs, timeouts, contact email)
 fsa_pipeline.db        SQLite database, gitignored (this is derived state -- rebuildable
@@ -366,6 +417,67 @@ fsa_pipeline.db        SQLite database, gitignored (this is derived state -- reb
   without discarding a genuinely strong *name* match that happens to
   share a formation agent with other companies (plausible for a small
   independent business that also outsources its accounts).
+- **The live FHRS API was investigated as a bulk-collection replacement
+  and rejected, but repurposed for postcode backfill.** The user asked
+  whether it could fix authority staleness (26 authorities over a week
+  stale as of 2026-08-24). Tested against 4 authorities spanning small to
+  large, most to moderately stale, Scottish and English: every one showed
+  **identical FHRSID sets and identical RatingValues** between live and
+  bulk -- no evidence the live API surfaces a new registration, closure,
+  or rating change that bulk misses. (One early false alarm: 260/180
+  apparent "rating differences" in the English tests turned out to be a
+  sentinel placeholder date, `1901-01-01`, that the live API substitutes
+  for a null `RatingDate` -- not a real difference, caught by checking
+  `RatingValue` itself separately from `RatingDate` before concluding
+  anything.) Replacing bulk collection wholesale would add a full new
+  JSON parser, not reduce request volume (still one call per authority),
+  and use a live-search backend (`"dataSource":"ElasticSearch"`) for a
+  bulk-harvesting pattern it doesn't seem designed for -- not recommended.
+  What the investigation did surface: **17.10% of establishments
+  nationally have no postcode in bulk data at all**, unrelated to
+  staleness (West Lindsey is 100% missing despite not being stale), and
+  the live API only partially recovers it (0% for West Lindsey
+  specifically -- confirmed missing at the source, not an FSA export
+  artifact -- but 89.4% nationally once actually run against every
+  candidate). That gap, not the original staleness question, is what
+  `backfill_postcodes.py` addresses.
+- **Backfilled postcodes live in a separate column, never overwriting
+  bulk's `post_code`.** This one decision resolves three requirements at
+  once: (1) a backfill can never be misread as FHRS data changing, since
+  it never touches `post_code`, the fingerprint, or `observations` at
+  all -- there is no code path by which it could create a spurious
+  `field_changed` event; (2) a backfilled value can never be silently
+  wiped out by a later bulk parse that still reports no postcode (the
+  likely case, since bulk was the reason it was missing in the first
+  place) -- bulk and backfill simply never touch the same column; (3)
+  when bulk *does* eventually get a real postcode from the council, the
+  existing unmodified `ingest_establishments` logic correctly detects it
+  as a genuine `field_changed` event, and `postcode_source` flips to
+  `'bulk'` automatically, because that's the column bulk actually writes.
+  No merge logic, no special-casing of the core ingest path was needed to
+  get any of this right -- keeping the two sources apart was enough.
+  Downstream code should read the effective postcode as
+  `COALESCE(post_code, postcode_from_live_api)` -- done for the matcher;
+  still to do for stage 5's address-history/ownership-change lookup and
+  the eventual territory-filtered CSV export, both of which are equally
+  postcode-dependent.
+- **New columns on an already-populated production table needed a real
+  migration, not just a schema change.** `CREATE TABLE IF NOT EXISTS` is
+  a no-op against a table that already exists, so adding
+  `postcode_source` etc. to the `SCHEMA` string alone would have done
+  nothing for the live database. `db._ensure_columns()` (called from
+  `connect()`) checks `PRAGMA table_info` and runs `ALTER TABLE ADD
+  COLUMN` for whatever's missing -- idempotent, safe to call every time.
+  Separately, ~508K existing rows that already had a bulk postcode
+  predated this column's existence and would never naturally get
+  `postcode_source='bulk'` retroactively (that value is only set on a
+  `first_seen`/`field_changed` event, and none of those rows will see
+  another one until their underlying data actually changes) -- fixed
+  with a one-time `UPDATE ... WHERE post_code IS NOT NULL AND
+  postcode_source IS NULL` directly against the production database on
+  2026-08-26. A future `rebuild_db.py` replay doesn't need this special
+  case: every row goes through `first_seen` on a fresh rebuild, so
+  `postcode_source` is set correctly from scratch with no gap.
 
 ## Data licensing
 

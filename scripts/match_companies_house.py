@@ -68,8 +68,12 @@ def run(force: bool) -> int:
             already_count += 1
             continue
 
+        # COALESCE: prefer the bulk postcode, fall back to a live-API
+        # backfill (fsa_pipeline/fhrs_live.py) when bulk has none. Never
+        # the reverse -- bulk is authoritative when present.
         establishment = conn.execute(
-            "SELECT business_name, post_code FROM establishments_current WHERE fhrsid = ?", (fhrsid,)
+            "SELECT business_name, COALESCE(post_code, postcode_from_live_api) "
+            "FROM establishments_current WHERE fhrsid = ?", (fhrsid,)
         ).fetchone()
 
         if establishment is None:

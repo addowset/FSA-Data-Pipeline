@@ -35,6 +35,14 @@ def make_config(**overrides) -> Config:
         ch_backoff_factor=1.0,
         high_density_address_threshold=5,
         candidates_per_match=5,
+        live_establishments_url="https://example.invalid/Establishments",
+        live_raw_dir=Path("raw/fhrs-live"),
+        live_page_size=5000,
+        live_request_delay_seconds=0.0,
+        live_timeout_seconds=1.0,
+        live_max_retries=1,
+        live_backoff_factor=1.0,
+        postcode_recheck_after_days=30,
     )
     return dataclasses.replace(base, **overrides)
 

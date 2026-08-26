@@ -56,6 +56,14 @@ class Config:
     ch_backoff_factor: float
     high_density_address_threshold: int
     candidates_per_match: int
+    live_establishments_url: str
+    live_raw_dir: Path
+    live_page_size: int
+    live_request_delay_seconds: float
+    live_timeout_seconds: float
+    live_max_retries: int
+    live_backoff_factor: float
+    postcode_recheck_after_days: int
 
     @property
     def user_agent(self) -> str:
@@ -74,6 +82,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     diffing = raw["diffing"]
     companies_house = raw["companies_house"]
     matching = raw["matching"]
+    postcode_backfill = raw["postcode_backfill"]
 
     return Config(
         authorities_url=fhrs["authorities_url"],
@@ -101,4 +110,12 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         ch_backoff_factor=float(companies_house["backoff_factor"]),
         high_density_address_threshold=int(matching["high_density_address_threshold"]),
         candidates_per_match=int(matching["candidates_per_match"]),
+        live_establishments_url=postcode_backfill["establishments_url"],
+        live_raw_dir=PROJECT_ROOT / postcode_backfill["raw_dir"],
+        live_page_size=int(postcode_backfill["page_size"]),
+        live_request_delay_seconds=float(postcode_backfill["request_delay_seconds"]),
+        live_timeout_seconds=float(postcode_backfill["timeout_seconds"]),
+        live_max_retries=int(postcode_backfill["max_retries"]),
+        live_backoff_factor=float(postcode_backfill["backoff_factor"]),
+        postcode_recheck_after_days=int(postcode_backfill["recheck_after_days"]),
     )

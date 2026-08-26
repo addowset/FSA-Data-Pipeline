@@ -57,6 +57,27 @@ high_density_address_threshold = 5
 # How many ranked candidates to store as evidence per FHRS INSERT event.
 candidates_per_match = 5
 
+[postcode_backfill]
+# Live FHRS Establishments API, used only to recover postcodes missing
+# from the bulk XML -- confirmed 2026-08-25/26 against real data that
+# 17.10% of establishments nationally (104,798 of 612,974) have no
+# postcode in bulk, unrelated to authority staleness (West Lindsey is
+# 100% missing despite not being stale at all), and that the live API
+# only partially recovers this (0% improvement for West Lindsey specifically,
+# 6-15% for other tested authorities) -- some gaps are missing at the
+# source and no access method fixes them. See README "Design notes".
+establishments_url = "https://api.ratings.food.gov.uk/Establishments"
+raw_dir = "raw/fhrs-live"
+page_size = 5000
+request_delay_seconds = 0.5
+timeout_seconds = 30
+max_retries = 5
+backoff_factor = 2.0
+# An establishment already checked and still unresolved isn't rechecked
+# again until this many days have passed -- avoids hammering the API
+# daily for gaps that are very unlikely to have changed since yesterday.
+recheck_after_days = 30
+
 [contact]
 # Used in the User-Agent header sent with every request, per FSA's request
 # for an honest, identifiable client. Not a secret.

@@ -83,6 +83,14 @@ CREATE TABLE IF NOT EXISTS establishments_current (
     confidence_in_management_score INTEGER,
     longitude REAL,
     latitude REAL,
+    -- Postcode backfill (see fsa_pipeline/fhrs_live.py). post_code above
+    -- is always exactly what the bulk XML says, untouched by backfill --
+    -- these three are additive and never overwrite it. Effective postcode
+    -- for any downstream use (matcher, address-history lookups, territory
+    -- filtering) is COALESCE(post_code, postcode_from_live_api).
+    postcode_source TEXT,
+    postcode_from_live_api TEXT,
+    postcode_backfill_checked_at TEXT,
     fingerprint TEXT NOT NULL,
     first_seen_date TEXT NOT NULL,
     last_seen_date TEXT NOT NULL,
@@ -241,7 +249,53 @@ CREATE TABLE IF NOT EXISTS company_match_candidates (
 );
 CREATE INDEX IF NOT EXISTS idx_company_match_candidates_fhrsid
     ON company_match_candidates(fhrsid, insert_collection_date);
+
+-- Postcode backfill tracking (see fsa_pipeline/fhrs_live.py). Runs are
+-- per (authority, day), for idempotency, same pattern as collection_runs.
+-- Events are an immutable audit trail, deliberately separate from
+-- `observations` -- a backfill is us correcting our own data, not a
+-- change FSA's own data made, and must never be misread as one.
+CREATE TABLE IF NOT EXISTS postcode_backfill_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    authority_code TEXT NOT NULL,
+    run_date TEXT NOT NULL,
+    candidates_checked INTEGER NOT NULL,
+    resolved_count INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    error_message TEXT,
+    run_at TEXT NOT NULL,
+    UNIQUE(authority_code, run_date)
+);
+
+CREATE TABLE IF NOT EXISTS postcode_backfill_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fhrsid INTEGER NOT NULL,
+    authority_code TEXT NOT NULL,
+    checked_at TEXT NOT NULL,
+    resolved INTEGER NOT NULL,
+    postcode_value TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_postcode_backfill_events_fhrsid
+    ON postcode_backfill_events(fhrsid);
 """
+
+# Columns added to establishments_current after it was already in use in
+# production (2026-08-26). CREATE TABLE IF NOT EXISTS above is a no-op
+# against an existing table, so these need an explicit migration -- see
+# _ensure_columns, called from connect().
+_ESTABLISHMENTS_CURRENT_MIGRATIONS = {
+    "postcode_source": "TEXT",
+    "postcode_from_live_api": "TEXT",
+    "postcode_backfill_checked_at": "TEXT",
+}
+
+
+def _ensure_columns(conn: sqlite3.Connection, table: str, columns: dict) -> None:
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    for name, sql_type in columns.items():
+        if name not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}")
+    conn.commit()
 
 _CURRENT_COLUMNS = (
     "local_authority_business_id", "business_name", "business_type", "business_type_id",
@@ -258,6 +312,7 @@ def connect(db_path: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     conn.executescript(SCHEMA)
+    _ensure_columns(conn, "establishments_current", _ESTABLISHMENTS_CURRENT_MIGRATIONS)
     return conn
 
 
@@ -360,16 +415,24 @@ def ingest_establishments(
         fhrsid = est["fhrsid"]
         fingerprint = compute_fingerprint(est)
         values = tuple(est[c] for c in _CURRENT_COLUMNS)
+        # Not part of _CURRENT_COLUMNS/_FINGERPRINT_FIELDS deliberately: it
+        # must never affect change detection, and postcode_from_live_api /
+        # postcode_backfill_checked_at (set only by the backfill job, see
+        # fsa_pipeline/fhrs_live.py) must never be touched by this bulk
+        # ingest path at all, or a backfilled postcode could be silently
+        # wiped out the next time bulk reports no postcode for the same
+        # establishment (which, per real data, is the common case).
+        postcode_source = "bulk" if est["post_code"] else None
 
         if fhrsid not in existing:
             stats.first_seen += 1
-            to_insert_current.append((fhrsid, authority_code, *values, fingerprint,
+            to_insert_current.append((fhrsid, authority_code, *values, fingerprint, postcode_source,
                                        collection_date, collection_date, collection_date))
             to_insert_observations.append((fhrsid, authority_code, collection_date, "first_seen",
                                             *values, fingerprint))
         elif existing[fhrsid] != fingerprint:
             stats.changed += 1
-            to_update_current.append((*values, fingerprint, collection_date, collection_date, fhrsid))
+            to_update_current.append((*values, fingerprint, postcode_source, collection_date, collection_date, fhrsid))
             to_insert_observations.append((fhrsid, authority_code, collection_date, "field_changed",
                                             *values, fingerprint))
         else:
@@ -387,9 +450,9 @@ def ingest_establishments(
         conn.executemany(
             f"""
             INSERT INTO establishments_current
-                (fhrsid, authority_code, {col_list}, fingerprint,
+                (fhrsid, authority_code, {col_list}, fingerprint, postcode_source,
                  first_seen_date, last_seen_date, last_changed_date)
-            VALUES (?, ?, {placeholders}, ?, ?, ?, ?)
+            VALUES (?, ?, {placeholders}, ?, ?, ?, ?, ?)
             """,
             to_insert_current,
         )
@@ -399,7 +462,7 @@ def ingest_establishments(
         conn.executemany(
             f"""
             UPDATE establishments_current
-            SET {set_clause}, fingerprint = ?, last_seen_date = ?, last_changed_date = ?
+            SET {set_clause}, fingerprint = ?, postcode_source = ?, last_seen_date = ?, last_changed_date = ?
             WHERE fhrsid = ?
             """,
             to_update_current,
@@ -602,4 +665,98 @@ def record_match(
             ],
         )
 
+    conn.commit()
+
+
+def get_postcode_backfill_candidates(conn: sqlite3.Connection, recheck_after_days: int) -> list[tuple[int, str]]:
+    """FHRSIDs with no bulk postcode that either haven't been checked
+    against the live API yet, or were checked long enough ago to be
+    worth rechecking (a gap might resolve outside the normal bulk
+    cycle -- see README "Design notes")."""
+    rows = conn.execute(
+        """
+        SELECT fhrsid, authority_code FROM establishments_current
+        WHERE post_code IS NULL
+          AND (
+                postcode_backfill_checked_at IS NULL
+                OR julianday('now') - julianday(postcode_backfill_checked_at) >= ?
+              )
+        """,
+        (recheck_after_days,),
+    ).fetchall()
+    return rows
+
+
+def already_backfilled(conn: sqlite3.Connection, authority_code: str, run_date: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM postcode_backfill_runs WHERE authority_code = ? AND run_date = ? AND status = 'ok'",
+        (authority_code, run_date),
+    ).fetchone()
+    return row is not None
+
+
+def record_postcode_backfill_run(
+    conn: sqlite3.Connection,
+    *,
+    authority_code: str,
+    run_date: str,
+    candidates_checked: int,
+    resolved_count: int,
+    status: str,
+    error_message: str | None = None,
+    run_at: str,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO postcode_backfill_runs
+            (authority_code, run_date, candidates_checked, resolved_count, status, error_message, run_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(authority_code, run_date) DO UPDATE SET
+            candidates_checked = excluded.candidates_checked,
+            resolved_count = excluded.resolved_count,
+            status = excluded.status,
+            error_message = excluded.error_message,
+            run_at = excluded.run_at
+        """,
+        (authority_code, run_date, candidates_checked, resolved_count, status, error_message, run_at),
+    )
+    conn.commit()
+
+
+def apply_postcode_backfill(
+    conn: sqlite3.Connection,
+    fhrsid: int,
+    authority_code: str,
+    postcode_value: str | None,
+    checked_at: str,
+) -> None:
+    """Records a backfill check. If postcode_value is given, sets
+    postcode_from_live_api and postcode_source='live_api' -- but only
+    while post_code (the bulk column) is still NULL, so this can never
+    clobber a real bulk value even under a rare race. Always records an
+    audit event, resolved or not, and updates postcode_backfill_checked_at
+    either way so an unresolved case isn't queried again until the
+    recheck interval passes."""
+    if postcode_value:
+        conn.execute(
+            """
+            UPDATE establishments_current
+            SET postcode_from_live_api = ?, postcode_source = 'live_api', postcode_backfill_checked_at = ?
+            WHERE fhrsid = ? AND post_code IS NULL
+            """,
+            (postcode_value, checked_at, fhrsid),
+        )
+    else:
+        conn.execute(
+            "UPDATE establishments_current SET postcode_backfill_checked_at = ? WHERE fhrsid = ?",
+            (checked_at, fhrsid),
+        )
+
+    conn.execute(
+        """
+        INSERT INTO postcode_backfill_events (fhrsid, authority_code, checked_at, resolved, postcode_value)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (fhrsid, authority_code, checked_at, int(bool(postcode_value)), postcode_value),
+    )
     conn.commit()
