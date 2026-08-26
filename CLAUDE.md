@@ -62,13 +62,23 @@ I publish anything.
 - Roughly 390 local authorities. I want **all of them**, not just the
   South West.
 
-Collect both routes daily:
+Collect via bulk XML for full national coverage and archival.
 
-- **Bulk XML** for full national coverage and archival.
-- **Live API** for the authorities I'm actively interested in (start with
-  Bristol, Bath & North East Somerset, South Gloucestershire, North
-  Somerset, Somerset, Gloucester, Cheltenham, Stroud), because the bulk
-  extracts lag by up to several days and latency is the product.
+~~Live API for priority authorities (Bristol, BANES, South
+Gloucestershire, North Somerset, Somerset, Gloucester, Cheltenham,
+Stroud)~~ — **dropped 2026-08-28.** This was meant to cut latency for a
+South West sample while validating demand, since the reasoning at the
+time was that bulk extracts lag by up to several days. Investigation
+(2026-08-25/26, see README "Design notes") found the live API returns
+identical FHRSIDs and identical ratings to bulk on every authority
+tested — it doesn't reduce time-to-detection for new registrations,
+because the bottleneck is each council's own reporting cadence to FSA,
+not API response latency. The one real benefit it did surface (better
+postcode completeness) is covered nationally by a separate
+`backfill_postcodes.py` job instead. Once stage 7 (CSV export) supports
+postcode-area/authority filtering, a curated regional sample for
+potential buyers can be sliced directly from the national pipeline
+already running, with no separate collection pathway needed.
 
 **Log the `ExtractDate` from each bulk file's header, per authority, every
 day.** I need to derive the real refresh cadence per authority empirically —
@@ -98,10 +108,11 @@ Note: `RatingValue` can be a number or a string such as "AwaitingInspection",
 
 ### Collection (build first)
 Daily job. Fetch all FHRS bulk files, write raw to `raw/fhrs/YYYY-MM-DD/`.
-Fetch live API for priority authorities. Fetch recent Companies House
-incorporations for hospitality SIC codes, write raw to
-`raw/companies-house/YYYY-MM-DD/`. Polite rate limiting, honest User-Agent
-with my contact email, retries with backoff, resume after partial failure.
+Fetch recent Companies House incorporations for hospitality SIC codes,
+write raw to `raw/companies-house/YYYY-MM-DD/`. Polite rate limiting,
+honest User-Agent with my contact email, retries with backoff, resume
+after partial failure. (Live API for priority authorities dropped
+2026-08-28 — see "Data sources" above.)
 
 ### Parsing and storage
 Parse raw into a local database. SQLite is fine to start; tell me if you

@@ -142,8 +142,11 @@ name match is near-exact. Run against all 1,709 real INSERT events:
 **136 OWNERSHIP_CHANGE, 8 NEW_VENUE (3 HIGH, 5 MEDIUM), 1,565 UNKNOWN**.
 23 new tests, all passing.
 
-Not yet built: live-API collection for priority FHRS authorities,
-metrics/monitoring, CSV export.
+Not yet built: metrics/monitoring, CSV export.
+
+Live-API collection for priority authorities (the original South West
+list) was in the brief but **dropped 2026-08-28** — see CLAUDE.md
+"Data sources" and the design note below for why.
 
 ## Setup
 
@@ -502,6 +505,20 @@ and confirms the lookup still finds it.
   artifact -- but 89.4% nationally once actually run against every
   candidate). That gap, not the original staleness question, is what
   `backfill_postcodes.py` addresses.
+- **Live-API collection for priority authorities, dropped 2026-08-28.**
+  The original brief wanted this to cut latency for a South West sample
+  (Bristol, BANES, South Gloucestershire, North Somerset, Somerset,
+  Gloucester, Cheltenham, Stroud) while demand was unvalidated. The
+  investigation above already answers why it wouldn't have helped: same
+  FHRSIDs, same ratings as bulk, so no latency win for new-registration
+  detection specifically — the bottleneck is council reporting cadence,
+  not which FSA endpoint is queried. Discussed with the user 2026-08-28
+  once stages 6/7 were imminent: the two things this item could still be
+  for are both already covered more generally — postcode completeness by
+  `backfill_postcodes.py` (national, not 8 authorities), and "a sample to
+  show potential buyers" by stage 7's planned postcode-area/authority
+  filtering on the national feed that's already running. See CLAUDE.md
+  "Data sources" for the brief's own updated text.
 - **Backfilled postcodes live in a separate column, never overwriting
   bulk's `post_code`.** This one decision resolves three requirements at
   once: (1) a backfill can never be misread as FHRS data changing, since
