@@ -286,6 +286,28 @@ fsa_pipeline.db        SQLite database, gitignored (this is derived state -- reb
                         from raw/ by reparsing, unlike raw/ itself)
 ```
 
+## Stage 5 design commitment (not yet built)
+
+**The address-history lookup for OWNERSHIP_CHANGE must query
+`establishments_current`, never `observations`.** Raised by the user
+2026-08-27, before stage 5 exists, specifically so it can't get built the
+other way by accident. `establishments_current` is the full national
+baseline (seeded 2026-08-20, ~611K establishments, maintained since) and
+never deletes a row — a closed business's address stays fully queryable
+forever, just with a `last_seen_date` that stopped advancing. `observations`
+is a changelog of *changes only*: confirmed 2026-08-27 that 99.2% of all
+613,305 establishments (608,292) have never had a single `field_changed`
+event — their only row is the original `first_seen`. An address-history
+lookup built against `observations` would be blind to nearly the entire
+baseline except the sliver that happened to also get a rating update,
+and would slowly, invisibly improve over months as more of it does --
+"OWNERSHIP_CHANGE barely works today, quietly gets better by spring"
+instead of "works correctly from day one." No test would catch this
+except one that specifically asserts the lookup finds a same-address
+predecessor establishment that has *never* had a field_changed event --
+worth writing that test first, before the lookup itself, when stage 5 is
+built.
+
 ## Design notes
 
 - **Raw archive is append-only.** Files are never overwritten or deleted.
