@@ -11,11 +11,13 @@ without touching the raw archive.
 Replays every dated directory under raw/fhrs/ through parse_fhrs_bulk.py,
 then diff_fhrs.py, in date order; every dated directory under
 raw/companies-house/ through parse_companies_house.py; then
-match_companies_house.py once at the end (matching needs the fully
-rebuilt establishments_current, diff_events, and companies_current, so it
-can't be interleaved with the per-date replay loops). All against a
+match_companies_house.py, backfill_postcodes.py, and
+classify_insertions.py once each at the end, in that order (each depends
+on the fully rebuilt state from the step before, so none of these three
+can be interleaved with the per-date replay loops above). All against a
 freshly emptied database. Never touches the network -- everything here
-is a replay of what's already archived under raw/.
+is a replay of what's already archived under raw/ (postcode backfill
+reuses raw/fhrs-live/<date>/ if present, same as a normal run).
 
 Usage:
     python scripts/rebuild_db.py
@@ -58,8 +60,11 @@ def main() -> None:
     print(f"wiping {config.db_path}")
     conn = db.connect(config.db_path)
     conn.executescript(
+        "DROP TABLE IF EXISTS classifications;"
         "DROP TABLE IF EXISTS company_match_candidates;"
         "DROP TABLE IF EXISTS company_match_runs;"
+        "DROP TABLE IF EXISTS postcode_backfill_events;"
+        "DROP TABLE IF EXISTS postcode_backfill_runs;"
         "DROP TABLE IF EXISTS diff_events;"
         "DROP TABLE IF EXISTS diff_runs;"
         "DROP TABLE IF EXISTS observations;"
@@ -87,17 +92,23 @@ def main() -> None:
     # not interleaved with the parse loop above.
     replay_dates(python, scripts_dir, project_root, "diff_fhrs.py", fhrs_dates)
 
+    def run_once(script_name: str) -> None:
+        print(f"--- {script_name} ---")
+        result = subprocess.run([python, str(scripts_dir / script_name)], cwd=str(project_root))
+        if result.returncode != 0:
+            print(f"{script_name} failed, aborting rebuild")
+            sys.exit(1)
+
+    run_once("backfill_postcodes.py")
+
     if ch_dates:
         print(f"replaying {len(ch_dates)} Companies House day(s): {', '.join(ch_dates)}")
         replay_dates(python, scripts_dir, project_root, "parse_companies_house.py", ch_dates)
-
-        print("--- matching ---")
-        result = subprocess.run([python, str(scripts_dir / "match_companies_house.py")], cwd=str(project_root))
-        if result.returncode != 0:
-            print("matching failed, aborting rebuild")
-            sys.exit(1)
+        run_once("match_companies_house.py")
     else:
         print("no Companies House raw archive found, skipping companies/matching replay")
+
+    run_once("classify_insertions.py")
 
     print("rebuild complete")
 

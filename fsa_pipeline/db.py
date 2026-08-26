@@ -277,6 +277,25 @@ CREATE TABLE IF NOT EXISTS postcode_backfill_events (
 );
 CREATE INDEX IF NOT EXISTS idx_postcode_backfill_events_fhrsid
     ON postcode_backfill_events(fhrsid);
+
+-- Stage 5 classification. Derived/rebuildable, same reasoning as
+-- company_match_runs -- a classification is a computation over current
+-- evidence, replaced wholesale on rerun rather than appended to.
+CREATE TABLE IF NOT EXISTS classifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fhrsid INTEGER NOT NULL,
+    authority_code TEXT NOT NULL,
+    insert_collection_date TEXT NOT NULL,
+    classification TEXT NOT NULL,
+    confidence TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    evidence_company_number TEXT,
+    evidence_predecessor_fhrsid INTEGER,
+    classified_at TEXT NOT NULL,
+    UNIQUE(fhrsid, insert_collection_date)
+);
+CREATE INDEX IF NOT EXISTS idx_classifications_authority_date
+    ON classifications(authority_code, insert_collection_date);
 """
 
 # Columns added to establishments_current after it was already in use in
@@ -758,5 +777,43 @@ def apply_postcode_backfill(
         VALUES (?, ?, ?, ?, ?)
         """,
         (fhrsid, authority_code, checked_at, int(bool(postcode_value)), postcode_value),
+    )
+    conn.commit()
+
+
+def already_classified(conn: sqlite3.Connection, fhrsid: int, insert_collection_date: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM classifications WHERE fhrsid = ? AND insert_collection_date = ?",
+        (fhrsid, insert_collection_date),
+    ).fetchone()
+    return row is not None
+
+
+def record_classification(
+    conn: sqlite3.Connection,
+    fhrsid: int,
+    authority_code: str,
+    insert_collection_date: str,
+    result,
+    classified_at: str,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO classifications
+            (fhrsid, authority_code, insert_collection_date, classification, confidence, reason,
+             evidence_company_number, evidence_predecessor_fhrsid, classified_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(fhrsid, insert_collection_date) DO UPDATE SET
+            classification = excluded.classification,
+            confidence = excluded.confidence,
+            reason = excluded.reason,
+            evidence_company_number = excluded.evidence_company_number,
+            evidence_predecessor_fhrsid = excluded.evidence_predecessor_fhrsid,
+            classified_at = excluded.classified_at
+        """,
+        (
+            fhrsid, authority_code, insert_collection_date, result.classification, result.confidence,
+            result.reason, result.evidence_company_number, result.evidence_predecessor_fhrsid, classified_at,
+        ),
     )
     conn.commit()

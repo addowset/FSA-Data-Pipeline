@@ -43,6 +43,8 @@ def make_config(**overrides) -> Config:
         live_max_retries=1,
         live_backoff_factor=1.0,
         postcode_recheck_after_days=30,
+        new_venue_high_threshold=0.85,
+        new_venue_medium_threshold=0.6,
     )
     return dataclasses.replace(base, **overrides)
 

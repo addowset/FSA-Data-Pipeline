@@ -78,6 +78,18 @@ backoff_factor = 2.0
 # daily for gaps that are very unlikely to have changed since yesterday.
 recheck_after_days = 30
 
+[classification]
+# Thresholds for treating a matcher candidate (fsa_pipeline/matcher.py)
+# as NEW_VENUE evidence. Grounded in real data (2026-08-27): among 645
+# INSERT events with a same-district candidate, median score is 0.27
+# (mostly coincidental), but 24 score >=0.5, 10 >=0.6, 5 >=0.9, 4 at
+# exactly 1.0 -- a real signal concentrated at the top, noise below.
+# Below new_venue_medium_threshold, a candidate isn't used for NEW_VENUE
+# at all (falls through to UNKNOWN) -- too weak to be worth more than
+# raw evidence in the audit trail.
+new_venue_high_threshold = 0.85
+new_venue_medium_threshold = 0.6
+
 [contact]
 # Used in the User-Agent header sent with every request, per FSA's request
 # for an honest, identifiable client. Not a secret.

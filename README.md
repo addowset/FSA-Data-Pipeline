@@ -9,8 +9,8 @@ Full project brief: [CLAUDE.md](CLAUDE.md). Build proceeds in stages; see
 
 ## Status
 
-**Stage 4 of 7 done and live-verified (collection and matcher). Plus a
-supplementary postcode-backfill job, outside the staged build order.**
+**Stages 1-5 of 7 done and live-verified.** Plus a supplementary
+postcode-backfill job, outside the staged build order.
 
 Stage 1 — fetches the FHRS local-authority index and all 363 authorities'
 bulk XML files daily, archives every response unmodified (gzip-compressed)
@@ -118,8 +118,31 @@ the live API directly). 15 new tests, all passing. **Not wired into
 see "Running the postcode backfill" for how to run it and the scheduling
 question still open.
 
-Not yet built: classification (NEW_VENUE/OWNERSHIP_CHANGE/UNKNOWN +
-confidence + reason), live-API collection for priority FHRS authorities,
+Stage 5 — classifies each FHRS INSERT event as `NEW_VENUE` /
+`OWNERSHIP_CHANGE` / `UNKNOWN` with a confidence grade and a
+human-readable reason, honouring the "Stage 5 design commitment" below
+(address-history lookup queries `establishments_current`, never
+`observations`). `OWNERSHIP_CHANGE` takes priority when found: a
+different FHRSID previously occupied the same normalized address
+(`address_line_1` + effective postcode) with **no temporal overlap** —
+the departed establishment's `last_seen_date` strictly before the new
+one's `first_seen_date`. That overlap requirement mattered in practice:
+an unfiltered address match found 316 of 1,709 real INSERT events with
+*some* other FHRSID at the same address, but many were large multi-outlet
+venues (a college campus, a community centre) where the "predecessor"
+was still active alongside the new record — requiring no overlap cut
+this to the genuine signal, **136 real ownership-change events**, e.g.
+"The Castle Inn" replaced by a new FHRSID also named "The Castle Inn" at
+the identical address, gone 11 days before the new one appeared.
+Otherwise, a strong Companies House match (from stage 4, thresholds
+grounded in real score distribution: HIGH ≥0.85, MEDIUM ≥0.6, below
+that → `UNKNOWN`) gives `NEW_VENUE`; a match at a high-density
+(formation-agent) address gets its confidence downgraded unless the
+name match is near-exact. Run against all 1,709 real INSERT events:
+**136 OWNERSHIP_CHANGE, 8 NEW_VENUE (3 HIGH, 5 MEDIUM), 1,565 UNKNOWN**.
+23 new tests, all passing.
+
+Not yet built: live-API collection for priority FHRS authorities,
 metrics/monitoring, CSV export.
 
 ## Setup
@@ -216,8 +239,8 @@ matching isn't a one-time fact the way an observation is).
 
 ## Running the postcode backfill
 
-Not part of the daily scheduled run — a supplementary job, run manually
-or scheduled separately at whatever cadence you choose:
+Part of the daily scheduled run (`run_daily.ps1`) as of 2026-08-26. To
+run manually:
 
 ```bash
 python scripts/backfill_postcodes.py
@@ -231,6 +254,21 @@ pass `--force` to rerun. First run resolved 89.4% of the national gap —
 see "Status" above and "Design notes" below for the full numbers and why
 the live API only partially helps.
 
+## Running the classifier
+
+After matching, classify each FHRS INSERT event:
+
+```bash
+python scripts/classify_insertions.py
+```
+
+Reads only from the database, never touches raw files or the network.
+Idempotent per (FHRSID, INSERT date); pass `--force` to reclassify
+everything (evidence changes as new Companies House data or new FHRS
+establishments arrive). Part of the daily scheduled run, last in the
+chain — it needs both the matcher's evidence and the current
+`establishments_current` baseline.
+
 ## Rebuilding the database
 
 The database is derived, rebuildable state; the raw archive is the actual
@@ -242,17 +280,19 @@ python scripts/rebuild_db.py
 ```
 
 Wipes `fsa_pipeline.db` and replays every dated directory under
-`raw/fhrs/` through `parse_fhrs_bulk.py` then `diff_fhrs.py`, every dated
-directory under `raw/companies-house/` through `parse_companies_house.py`,
-then `match_companies_house.py` once at the end. Never touches the
-network.
+`raw/fhrs/` through `parse_fhrs_bulk.py` then `diff_fhrs.py`, postcode
+backfill, every dated directory under `raw/companies-house/` through
+`parse_companies_house.py`, matching, then classification, in that
+order. Never touches the network — postcode backfill reuses the
+already-archived pages under `raw/fhrs-live/<date>/` rather than
+re-querying the live API, provided that directory still exists.
 
-**Does not replay postcode backfill** — wiping `establishments_current`
-resets `postcode_from_live_api`/`postcode_backfill_checked_at` to empty,
-since that table is dropped and rebuilt fresh. Run
-`python scripts/backfill_postcodes.py` again afterwards to restore it;
-it'll reuse the already-archived raw pages under `raw/fhrs-live/<today>/`
-rather than re-querying the API, provided that directory still exists.
+**Fixed 2026-08-28**: an earlier version of this script didn't drop
+`postcode_backfill_runs`/`postcode_backfill_events`, so a rebuild would
+leave stale "already checked" tracking pointing at postcode data that
+had just been wiped — the backfill job would then wrongly skip
+authorities on the next run, thinking they were already done. All
+derived tables are now dropped and replayed together.
 
 ## Running tests
 
@@ -267,8 +307,8 @@ fsa_pipeline/        shared library code (config, HTTP client, FHRS + Companies 
                         parsing, archive writer, db)
 scripts/              entry-point scripts: collect_fhrs_bulk.py, parse_fhrs_bulk.py,
                         diff_fhrs.py, collect_companies_house.py, parse_companies_house.py,
-                        match_companies_house.py, backfill_postcodes.py, rebuild_db.py,
-                        run_daily.ps1 (scheduled task entry point)
+                        match_companies_house.py, backfill_postcodes.py, classify_insertions.py,
+                        rebuild_db.py, run_daily.ps1 (scheduled task entry point)
 raw/                  raw archive, gitignored — this is the asset, back it up separately
   fhrs/<date>/        one dated directory per collection run
     _authorities-index.xml.gz   that day's local-authority list, as returned by the API
@@ -286,27 +326,26 @@ fsa_pipeline.db        SQLite database, gitignored (this is derived state -- reb
                         from raw/ by reparsing, unlike raw/ itself)
 ```
 
-## Stage 5 design commitment (not yet built)
+## Stage 5 design commitment — fulfilled
 
-**The address-history lookup for OWNERSHIP_CHANGE must query
+**The address-history lookup for OWNERSHIP_CHANGE queries
 `establishments_current`, never `observations`.** Raised by the user
-2026-08-27, before stage 5 exists, specifically so it can't get built the
-other way by accident. `establishments_current` is the full national
-baseline (seeded 2026-08-20, ~611K establishments, maintained since) and
-never deletes a row — a closed business's address stays fully queryable
-forever, just with a `last_seen_date` that stopped advancing. `observations`
-is a changelog of *changes only*: confirmed 2026-08-27 that 99.2% of all
-613,305 establishments (608,292) have never had a single `field_changed`
-event — their only row is the original `first_seen`. An address-history
-lookup built against `observations` would be blind to nearly the entire
-baseline except the sliver that happened to also get a rating update,
-and would slowly, invisibly improve over months as more of it does --
-"OWNERSHIP_CHANGE barely works today, quietly gets better by spring"
-instead of "works correctly from day one." No test would catch this
-except one that specifically asserts the lookup finds a same-address
-predecessor establishment that has *never* had a field_changed event --
-worth writing that test first, before the lookup itself, when stage 5 is
-built.
+2026-08-27, before stage 5 existed, specifically so it couldn't get built
+the other way by accident; built 2026-08-27/28 honouring it.
+`establishments_current` is the full national baseline (seeded
+2026-08-20, ~611K establishments, maintained since) and never deletes a
+row — a closed business's address stays fully queryable forever, just
+with a `last_seen_date` that stopped advancing. `observations` is a
+changelog of *changes only*: 99.2% of all 613,305 establishments
+(608,292) have never had a single `field_changed` event — their only row
+is the original `first_seen`. `fsa_pipeline/classifier.py`'s
+`build_address_index`/`find_predecessor` are built entirely off
+`establishments_current` data with no code path touching `observations`
+at all, so this can't happen by construction, not just by care --
+verified with a test that builds a predecessor via the real `db` module
+with zero `field_changed` events on purpose
+(`test_predecessor_lookup_works_against_establishment_with_zero_field_changed_events`)
+and confirms the lookup still finds it.
 
 ## Design notes
 

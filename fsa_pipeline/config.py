@@ -64,6 +64,8 @@ class Config:
     live_max_retries: int
     live_backoff_factor: float
     postcode_recheck_after_days: int
+    new_venue_high_threshold: float
+    new_venue_medium_threshold: float
 
     @property
     def user_agent(self) -> str:
@@ -83,6 +85,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     companies_house = raw["companies_house"]
     matching = raw["matching"]
     postcode_backfill = raw["postcode_backfill"]
+    classification = raw["classification"]
 
     return Config(
         authorities_url=fhrs["authorities_url"],
@@ -118,4 +121,6 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         live_max_retries=int(postcode_backfill["max_retries"]),
         live_backoff_factor=float(postcode_backfill["backoff_factor"]),
         postcode_recheck_after_days=int(postcode_backfill["recheck_after_days"]),
+        new_venue_high_threshold=float(classification["new_venue_high_threshold"]),
+        new_venue_medium_threshold=float(classification["new_venue_medium_threshold"]),
     )
