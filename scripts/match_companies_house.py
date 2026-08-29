@@ -2,9 +2,14 @@
 """Matches FHRS INSERT events against Companies House companies.
 
 For every INSERT event in diff_events not yet matched, looks up
-candidates in companies_current by postcode district + company name
-similarity, and stores the ranked evidence in company_match_candidates /
-company_match_runs. See fsa_pipeline/matcher.py for the approach.
+candidates two ways: postcode-district + name similarity (the original
+search), and a national name-only search independent of district (added
+2026-08-28 -- catches a company registered via a formation agent or
+personal address in a different district to where it actually trades,
+confirmed real cases: "Soul Mama Islington", "Mamma Rosa London"). Both
+channels' results are merged and the ranked evidence stored in
+company_match_candidates / company_match_runs. See fsa_pipeline/matcher.py
+for the approach and its trade-offs.
 
 Does not decide NEW_VENUE / OWNERSHIP_CHANGE / UNKNOWN -- that's stage 5.
 
@@ -29,7 +34,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from fsa_pipeline import db
 from fsa_pipeline.config import load_config
 from fsa_pipeline.logging_utils import setup_logger
-from fsa_pipeline.matcher import build_address_density, build_companies_by_district, find_candidates
+from fsa_pipeline.matcher import (
+    build_address_density,
+    build_companies_by_district,
+    build_companies_by_first_word,
+    find_candidates,
+    find_national_candidates,
+    merge_candidates,
+)
 
 
 def now_iso() -> str:
@@ -42,16 +54,17 @@ def run(force: bool) -> int:
 
     conn = db.connect(config.db_path)
 
-    company_columns = ("company_number", "company_name", "address_line_1", "postal_code")
+    company_columns = ("company_number", "company_name", "address_line_1", "postal_code", "date_of_creation")
     companies = [
         dict(zip(company_columns, row))
         for row in conn.execute(
-            "SELECT company_number, company_name, address_line_1, postal_code FROM companies_current"
+            "SELECT company_number, company_name, address_line_1, postal_code, date_of_creation FROM companies_current"
         ).fetchall()
     ]
     logger.info("%d companies loaded for candidate matching", len(companies))
 
     companies_by_district = build_companies_by_district(companies)
+    companies_by_first_word = build_companies_by_first_word(companies)
     address_density = build_address_density(companies)
 
     insert_events = conn.execute(
@@ -81,10 +94,15 @@ def run(force: bool) -> int:
             continue
 
         business_name, post_code = establishment
-        candidates = find_candidates(
+        district_candidates = find_candidates(
             business_name, post_code, companies_by_district, address_density,
             config.high_density_address_threshold, config.candidates_per_match,
         )
+        national_candidates = find_national_candidates(
+            business_name, companies_by_first_word, address_density,
+            config.high_density_address_threshold, config.national_match_threshold, config.candidates_per_match,
+        )
+        candidates = merge_candidates(district_candidates, national_candidates, config.candidates_per_match)
 
         db.record_match(conn, fhrsid, authority_code, collection_date, candidates, now_iso())
 
@@ -93,9 +111,9 @@ def run(force: bool) -> int:
             found_candidate_count += 1
             top = candidates[0]
             logger.info(
-                "fhrsid %s (%s): %d candidate(s), best=%s score=%.2f%s",
+                "fhrsid %s (%s): %d candidate(s), best=%s score=%.2f via %s%s",
                 fhrsid, business_name, len(candidates), top.company_name, top.name_similarity_score,
-                " [HIGH-DENSITY ADDRESS]" if top.is_high_density_address else "",
+                top.match_strategy, " [HIGH-DENSITY ADDRESS]" if top.is_high_density_address else "",
             )
         else:
             logger.info("fhrsid %s (%s): no candidates", fhrsid, business_name)

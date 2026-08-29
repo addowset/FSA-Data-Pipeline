@@ -18,6 +18,22 @@ so stage 5's classification logic can discount an address-based signal
 ("a company incorporated at the same address as an existing food
 business") when that address is a known high-density one.
 
+Second channel added 2026-08-28: district-only search has a real blind
+spot, confirmed by ground-truth checking -- "Soul Mama Islington"
+(trades N1) and "Mamma Rosa London" (trades N19) were both registered
+via addresses in a completely different postcode district (a formation
+agent, and what looks like a personal address), so no amount of tuning
+the district search would ever find them. find_national_candidates
+searches nationally by name only, independent of district, with a much
+stricter similarity floor (config.toml's national_match_threshold) since
+there's no geographic corroboration behind it. To keep this tractable
+against a ~260K-company national pool (see collect_companies_house.py
+--full-history), it's blocked by the first normalized word of the name
+rather than scored against everything -- a real, documented trade-off:
+it will miss a match whose first word itself diverges (a typo, or a
+genuinely different leading word), but every real case that motivated
+this channel shared an exact leading phrase with its legal name.
+
 This module only finds and scores candidates -- it does not decide
 NEW_VENUE / OWNERSHIP_CHANGE / UNKNOWN. That classification is stage 5,
 which will consume this module's output (fsa_pipeline/db.py's
@@ -92,6 +108,8 @@ class Candidate:
     postcode_district: str
     address_company_count: int
     is_high_density_address: bool
+    match_strategy: str = "district"  # 'district' | 'national'
+    date_of_creation: str | None = None
 
 
 def build_address_density(companies: list[dict]) -> dict[str, int]:
@@ -118,6 +136,34 @@ def build_companies_by_district(companies: list[dict]) -> dict[str, list[dict]]:
     return by_district
 
 
+def build_companies_by_first_word(companies: list[dict]) -> dict[str, list[dict]]:
+    """Blocking index for the national channel: normalized name's first
+    word -> companies. Keeps a ~260K-company national search tractable
+    without scoring against everything for every INSERT event."""
+    by_first_word: dict[str, list[dict]] = {}
+    for company in companies:
+        normalized = normalize_company_name(company.get("company_name"))
+        if not normalized:
+            continue
+        first_word = normalized.split(" ", 1)[0]
+        by_first_word.setdefault(first_word, []).append(company)
+    return by_first_word
+
+
+def _make_candidate(company: dict, score: float, district: str | None, address_density: dict, high_density_threshold: int, strategy: str) -> Candidate:
+    density = address_density.get(_address_key(company), 1)
+    return Candidate(
+        company_number=company["company_number"],
+        company_name=company.get("company_name") or "",
+        name_similarity_score=round(score, 4),
+        postcode_district=district or (normalize_postcode_district(company.get("postal_code")) or ""),
+        address_company_count=density,
+        is_high_density_address=density >= high_density_threshold,
+        match_strategy=strategy,
+        date_of_creation=company.get("date_of_creation"),
+    )
+
+
 def find_candidates(
     business_name: str,
     postcode: str,
@@ -136,20 +182,58 @@ def find_candidates(
 
     normalized_target = normalize_company_name(business_name)
 
-    scored = []
-    for company in same_district:
-        score = name_similarity(normalized_target, normalize_company_name(company.get("company_name")))
-        density = address_density.get(_address_key(company), 1)
-        scored.append(
-            Candidate(
-                company_number=company["company_number"],
-                company_name=company.get("company_name") or "",
-                name_similarity_score=round(score, 4),
-                postcode_district=district,
-                address_company_count=density,
-                is_high_density_address=density >= high_density_threshold,
-            )
+    scored = [
+        _make_candidate(
+            company, name_similarity(normalized_target, normalize_company_name(company.get("company_name"))),
+            district, address_density, high_density_threshold, "district",
         )
+        for company in same_district
+    ]
 
     scored.sort(key=lambda c: c.name_similarity_score, reverse=True)
     return scored[:top_n]
+
+
+def find_national_candidates(
+    business_name: str,
+    companies_by_first_word: dict[str, list[dict]],
+    address_density: dict[str, int],
+    high_density_threshold: int,
+    threshold: float,
+    top_n: int = 5,
+) -> list[Candidate]:
+    """Name-only search, independent of postcode district. See module
+    docstring for why (formation-agent registrations invisible to
+    district search) and its blocking-by-first-word trade-off."""
+    normalized_target = normalize_company_name(business_name)
+    if not normalized_target:
+        return []
+
+    first_word = normalized_target.split(" ", 1)[0]
+    pool = companies_by_first_word.get(first_word, [])
+    if not pool:
+        return []
+
+    scored = []
+    for company in pool:
+        score = name_similarity(normalized_target, normalize_company_name(company.get("company_name")))
+        if score >= threshold:
+            scored.append(_make_candidate(company, score, None, address_density, high_density_threshold, "national"))
+
+    scored.sort(key=lambda c: c.name_similarity_score, reverse=True)
+    return scored[:top_n]
+
+
+def merge_candidates(district_candidates: list[Candidate], national_candidates: list[Candidate], top_n: int) -> list[Candidate]:
+    """Combines both channels' results, deduplicating by company_number
+    (keeping the higher-scoring entry if a company appears in both --
+    district search already gives a district-corroborated result, which
+    is preferable evidence to the same company found nationally)."""
+    by_number: dict[str, Candidate] = {}
+    for candidate in district_candidates + national_candidates:
+        existing = by_number.get(candidate.company_number)
+        if existing is None or candidate.name_similarity_score > existing.name_similarity_score:
+            by_number[candidate.company_number] = candidate
+
+    merged = sorted(by_number.values(), key=lambda c: c.name_similarity_score, reverse=True)
+    return merged[:top_n]

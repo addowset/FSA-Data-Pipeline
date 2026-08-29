@@ -26,6 +26,19 @@ sic_codes = ["56101", "56102", "56103", "56210", "56290", "56301", "56302"]
 # re-fetch) rather than a strict single-day cutoff, to absorb any
 # indexing lag between a company's incorporation and it becoming
 # searchable -- the same lesson FHRS's ExtractDate lag already taught us.
+#
+# This window is deliberately narrow -- it's for ONGOING daily top-ups
+# only. It is NOT how the matcher's overall recall is bounded: real
+# ground-truth checking (2026-08-27/28) found genuine matches missed
+# because their companies were incorporated 5 months, 18 months, and 6
+# years before the FHRS record appeared -- no daily window would have
+# been wide enough. Fixed with a one-time full-history backfill instead
+# (scripts/collect_companies_house.py --full-history, no incorporated_from
+# lower bound, confirmed real scale 2026-08-28: 259,986 active hospitality
+# companies nationally -- big, but ~52 pages at size=5000, trivial against
+# the 600-requests-per-5-minutes rate limit). companies_current accumulates
+# and never deletes, so the daily window only needs to catch what's new
+# since the last run, not re-cover the whole history every day.
 incorporated_window_days = 14
 page_size = 500
 request_delay_seconds = 0.5
@@ -56,6 +69,17 @@ median_window_days = 28
 high_density_address_threshold = 5
 # How many ranked candidates to store as evidence per FHRS INSERT event.
 candidates_per_match = 5
+# National name-match channel (2026-08-28), independent of postcode
+# district -- catches a company registered via a formation agent in a
+# different district to where it actually trades (confirmed real case:
+# "Soul Mama Islington" traded from N1, registered via a formation agent
+# at 71-75 Shelton Street, WC2H -- invisible to district-only search no
+# matter how good the name match). Needs a much stricter floor than the
+# district-scoped search since there's no geographic corroboration behind
+# it, and the candidate pool is much larger post-backfill (~260K
+# companies nationally vs ~2K before) so coincidental collisions are more
+# likely. User's call, 2026-08-28, adjustable once real output is seen.
+national_match_threshold = 0.9
 
 [postcode_backfill]
 # Live FHRS Establishments API, used only to recover postcodes missing
@@ -89,6 +113,26 @@ recheck_after_days = 30
 # raw evidence in the audit trail.
 new_venue_high_threshold = 0.85
 new_venue_medium_threshold = 0.6
+# A matched company only counts as NEW_VENUE-worthy evidence of an
+# actually-new business if it was incorporated within this many days of
+# the FHRS record's first_seen_date. Without this, widening Companies
+# House collection to full history (2026-08-28, see [companies_house])
+# would let an 18-month-old company (real case: "Mamma Rosa London")
+# get labelled NEW_VENUE just for having no FHRS predecessor. User's
+# reasoning, 2026-08-28: someone can incorporate a company well before
+# actually opening -- "could easily be a year" -- 180 days chosen as a
+# deliberately generous floor, not a tight one.
+new_venue_max_incorporation_age_days = 180
+# Address-history fallback (fsa_pipeline/classifier.py) when
+# address_line_1 is missing on either side of a potential predecessor
+# match -- falls back to postcode + this name-similarity floor instead
+# of the normal exact-address match. Real case that motivated this: two
+# "Rassau Fish Bar" FHRSIDs at the identical postcode, genuinely
+# sequential (no overlap), missed entirely because the newer record's
+# address_line_1 was null. Kept strict (near-exact) because a single
+# postcode can host many unrelated venues (confirmed: one Belfast
+# postcode hosts 11), so postcode alone isn't enough evidence.
+address_history_fallback_threshold = 0.9
 
 [contact]
 # Used in the User-Agent header sent with every request, per FSA's request

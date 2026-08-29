@@ -56,6 +56,7 @@ class Config:
     ch_backoff_factor: float
     high_density_address_threshold: int
     candidates_per_match: int
+    national_match_threshold: float
     live_establishments_url: str
     live_raw_dir: Path
     live_page_size: int
@@ -66,6 +67,8 @@ class Config:
     postcode_recheck_after_days: int
     new_venue_high_threshold: float
     new_venue_medium_threshold: float
+    new_venue_max_incorporation_age_days: int
+    address_history_fallback_threshold: float
 
     @property
     def user_agent(self) -> str:
@@ -113,6 +116,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         ch_backoff_factor=float(companies_house["backoff_factor"]),
         high_density_address_threshold=int(matching["high_density_address_threshold"]),
         candidates_per_match=int(matching["candidates_per_match"]),
+        national_match_threshold=float(matching["national_match_threshold"]),
         live_establishments_url=postcode_backfill["establishments_url"],
         live_raw_dir=PROJECT_ROOT / postcode_backfill["raw_dir"],
         live_page_size=int(postcode_backfill["page_size"]),
@@ -123,4 +127,6 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         postcode_recheck_after_days=int(postcode_backfill["recheck_after_days"]),
         new_venue_high_threshold=float(classification["new_venue_high_threshold"]),
         new_venue_medium_threshold=float(classification["new_venue_medium_threshold"]),
+        new_venue_max_incorporation_age_days=int(classification["new_venue_max_incorporation_age_days"]),
+        address_history_fallback_threshold=float(classification["address_history_fallback_threshold"]),
     )

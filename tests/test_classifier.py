@@ -1,7 +1,16 @@
 import dataclasses
 from pathlib import Path
 
-from fsa_pipeline.classifier import address_key, build_address_index, classify, find_predecessor
+from fsa_pipeline.classifier import (
+    Predecessor,
+    address_key,
+    build_address_index,
+    build_company_operator_index,
+    build_postcode_index,
+    classify,
+    find_existing_operator,
+    find_predecessor,
+)
 from fsa_pipeline.config import Config
 from fsa_pipeline.matcher import Candidate
 
@@ -17,10 +26,12 @@ def make_config(**overrides) -> Config:
         ch_raw_dir=Path("raw/companies-house"), ch_sic_codes=["56101"], ch_incorporated_window_days=14,
         ch_page_size=500, ch_request_delay_seconds=0.0, ch_timeout_seconds=1.0, ch_max_retries=1,
         ch_backoff_factor=1.0, high_density_address_threshold=5, candidates_per_match=5,
+        national_match_threshold=0.9,
         live_establishments_url="https://example.invalid/Establishments", live_raw_dir=Path("raw/fhrs-live"),
         live_page_size=5000, live_request_delay_seconds=0.0, live_timeout_seconds=1.0, live_max_retries=1,
         live_backoff_factor=1.0, postcode_recheck_after_days=30,
         new_venue_high_threshold=0.85, new_venue_medium_threshold=0.6,
+        new_venue_max_incorporation_age_days=180, address_history_fallback_threshold=0.9,
     )
     return dataclasses.replace(base, **overrides)
 
@@ -33,10 +44,12 @@ def make_establishment(fhrsid, name, address_line_1="1 High Street", postcode="N
     }
 
 
-def make_candidate(score, high_density=False, count=1, name="Some Company Ltd", number="12345678"):
+def make_candidate(score, high_density=False, count=1, name="Some Company Ltd", number="12345678",
+                    date_of_creation="2026-07-01", strategy="district"):
     return Candidate(
         company_number=number, company_name=name, name_similarity_score=score,
         postcode_district="NG17", address_company_count=count, is_high_density_address=high_density,
+        match_strategy=strategy, date_of_creation=date_of_creation,
     )
 
 
@@ -52,11 +65,12 @@ def test_address_key_none_when_missing():
     assert address_key("", "NG17 3GA") is None
 
 
-# --- build_address_index / find_predecessor ---
+# --- find_predecessor: exact address path ---
 
-def test_find_predecessor_none_when_no_history(tmp_path):
+def test_find_predecessor_none_when_no_history():
     index = build_address_index([make_establishment(1, "New Cafe")])
-    result = find_predecessor(1, "1 High Street", "NG17 3GA", "2026-08-20", index)
+    pc_index = build_postcode_index([make_establishment(1, "New Cafe")])
+    result = find_predecessor(1, "New Cafe", "1 High Street", "NG17 3GA", "2026-08-20", index, pc_index, 0.9)
     assert result is None
 
 
@@ -66,8 +80,9 @@ def test_find_predecessor_excludes_still_active_overlap():
     old = make_establishment(1, "Legends Bar", first_seen="2026-08-01", last_seen="2026-08-26")
     new = make_establishment(2, "New Outlet", first_seen="2026-08-20")
     index = build_address_index([old, new])
+    pc_index = build_postcode_index([old, new])
 
-    result = find_predecessor(2, new["address_line_1"], new["postcode"], new["first_seen_date"], index)
+    result = find_predecessor(2, new["business_name"], new["address_line_1"], new["postcode"], new["first_seen_date"], index, pc_index, 0.9)
     assert result is None  # old was still active (last_seen 08-26 >= new's first_seen 08-20)
 
 
@@ -75,8 +90,9 @@ def test_find_predecessor_finds_genuinely_departed_business():
     old = make_establishment(1, "The Castle Inn", first_seen="2020-01-01", last_seen="2026-08-15")
     new = make_establishment(2, "The New Kitchen", first_seen="2026-08-20")
     index = build_address_index([old, new])
+    pc_index = build_postcode_index([old, new])
 
-    result = find_predecessor(2, new["address_line_1"], new["postcode"], new["first_seen_date"], index)
+    result = find_predecessor(2, new["business_name"], new["address_line_1"], new["postcode"], new["first_seen_date"], index, pc_index, 0.9)
     assert result is not None
     assert result.fhrsid == 1
     assert result.business_name == "The Castle Inn"
@@ -88,8 +104,9 @@ def test_find_predecessor_picks_most_recently_departed():
     old2 = make_establishment(2, "Second Tenant", first_seen="2018-06-01", last_seen="2026-08-10")
     new = make_establishment(3, "Third Tenant", first_seen="2026-08-20")
     index = build_address_index([old1, old2, new])
+    pc_index = build_postcode_index([old1, old2, new])
 
-    result = find_predecessor(3, new["address_line_1"], new["postcode"], new["first_seen_date"], index)
+    result = find_predecessor(3, new["business_name"], new["address_line_1"], new["postcode"], new["first_seen_date"], index, pc_index, 0.9)
     assert result.fhrsid == 2  # most recent departure, not the oldest
 
 
@@ -97,27 +114,110 @@ def test_find_predecessor_ignores_different_address():
     old = make_establishment(1, "Elsewhere", address_line_1="99 Other Road", last_seen="2020-01-01")
     new = make_establishment(2, "New Place", first_seen="2026-08-20")
     index = build_address_index([old, new])
+    pc_index = build_postcode_index([old, new])
 
-    result = find_predecessor(2, new["address_line_1"], new["postcode"], new["first_seen_date"], index)
+    result = find_predecessor(2, new["business_name"], new["address_line_1"], new["postcode"], new["first_seen_date"], index, pc_index, 0.9)
     assert result is None
 
 
 def test_find_predecessor_none_when_postcode_missing():
     index = build_address_index([make_establishment(1, "Old", last_seen="2020-01-01")])
-    result = find_predecessor(2, "1 High Street", None, "2026-08-20", index)
+    result = find_predecessor(2, "New", "1 High Street", None, "2026-08-20", index, {}, 0.9)
+    assert result is None
+
+
+# --- find_predecessor: fallback path (the Rassau bug) ---
+
+def test_find_predecessor_fallback_when_address_line_1_missing():
+    """The real bug: two 'Rassau Fish Bar' FHRSIDs at the identical
+    postcode, genuinely sequential, missed because the newer record's
+    address_line_1 was null -- the exact-match layer never even looks."""
+    old = make_establishment(1, "Rassau Fish Bar", address_line_1=None, postcode="NP23 5PP",
+                              first_seen="2026-08-20", last_seen="2026-08-21")
+    new = make_establishment(2, "Rassau Fish Bar", address_line_1=None, postcode="NP23 5PP",
+                              first_seen="2026-08-22")
+    index = build_address_index([old, new])  # both excluded, address_line_1 is None
+    pc_index = build_postcode_index([old, new])
+
+    result = find_predecessor(2, new["business_name"], new["address_line_1"], new["postcode"], new["first_seen_date"], index, pc_index, 0.9)
+
+    assert result is not None
+    assert result.fhrsid == 1
+
+
+def test_find_predecessor_fallback_requires_near_exact_name():
+    """A shared postcode alone isn't enough evidence -- confirmed real
+    data has postcodes hosting a dozen unrelated venues."""
+    old = make_establishment(1, "Completely Different Shop", address_line_1=None, postcode="BT7 3GP", last_seen="2026-08-15")
+    new = make_establishment(2, "Some Cafe", address_line_1=None, postcode="BT7 3GP", first_seen="2026-08-20")
+    index = build_address_index([old, new])
+    pc_index = build_postcode_index([old, new])
+
+    result = find_predecessor(2, new["business_name"], new["address_line_1"], new["postcode"], new["first_seen_date"], index, pc_index, 0.9)
+    assert result is None
+
+
+def test_find_predecessor_fallback_only_used_when_exact_match_finds_nothing():
+    """When address_line_1 is present but simply doesn't match anything,
+    the fallback should still be tried (not short-circuited)."""
+    old = make_establishment(1, "Rassau Fish Bar", address_line_1=None, postcode="NP23 5PP", last_seen="2026-08-21")
+    new = make_establishment(2, "Rassau Fish Bar", address_line_1="4 School Road", postcode="NP23 5PP", first_seen="2026-08-22")
+    index = build_address_index([old, new])
+    pc_index = build_postcode_index([old, new])
+
+    result = find_predecessor(2, new["business_name"], new["address_line_1"], new["postcode"], new["first_seen_date"], index, pc_index, 0.9)
+    assert result is not None
+    assert result.fhrsid == 1
+
+
+# --- existing-operator detection (Soul Mama Stratford case) ---
+
+def test_find_existing_operator_none_when_first_venue():
+    index = build_company_operator_index([
+        {"fhrsid": 1, "company_number": "123", "business_name": "Venue One", "first_seen_date": "2026-08-20"},
+    ])
+    result = find_existing_operator(1, "123", "2026-08-20", index)
+    assert result is None
+
+
+def test_find_existing_operator_finds_earlier_venue():
+    index = build_company_operator_index([
+        {"fhrsid": 1, "company_number": "123", "business_name": "Soul Mama Islington", "first_seen_date": "2026-08-21"},
+        {"fhrsid": 2, "company_number": "123", "business_name": "Soul Mama Stratford", "first_seen_date": "2026-10-15"},
+    ])
+    result = find_existing_operator(2, "123", "2026-10-15", index)
+    assert result is not None
+    assert result.fhrsid == 1
+    assert result.business_name == "Soul Mama Islington"
+
+
+def test_find_existing_operator_ignores_later_venues():
+    """A venue opening later than this one isn't "existing" relative to it."""
+    index = build_company_operator_index([
+        {"fhrsid": 1, "company_number": "123", "business_name": "First", "first_seen_date": "2026-08-21"},
+        {"fhrsid": 2, "company_number": "123", "business_name": "Second", "first_seen_date": "2026-10-15"},
+    ])
+    result = find_existing_operator(1, "123", "2026-08-21", index)
+    assert result is None
+
+
+def test_find_existing_operator_different_company_ignored():
+    index = build_company_operator_index([
+        {"fhrsid": 1, "company_number": "999", "business_name": "Unrelated", "first_seen_date": "2020-01-01"},
+    ])
+    result = find_existing_operator(2, "123", "2026-08-21", index)
     assert result is None
 
 
 # --- classify ---
 
 def test_classify_ownership_change_takes_priority_over_company_match():
-    from fsa_pipeline.classifier import Predecessor
     predecessor = Predecessor(fhrsid=1, business_name="Old Tenant", first_seen_date="2020-01-01", last_seen_date="2026-08-15")
     candidate = make_candidate(score=1.0)
 
     result = classify(
-        postcode="NG17 3GA", candidates_found=1, best_candidate=candidate,
-        predecessor=predecessor, config=make_config(),
+        first_seen_date="2026-08-20", postcode="NG17 3GA", candidates_found=1, best_candidate=candidate,
+        predecessor=predecessor, existing_operator=None, config=make_config(),
     )
 
     assert result.classification == "OWNERSHIP_CHANGE"
@@ -129,10 +229,12 @@ def test_classify_ownership_change_takes_priority_over_company_match():
 
 
 def test_classify_ownership_change_without_company_match():
-    from fsa_pipeline.classifier import Predecessor
     predecessor = Predecessor(fhrsid=1, business_name="Old Tenant", first_seen_date="2020-01-01", last_seen_date="2026-08-15")
 
-    result = classify(postcode="NG17 3GA", candidates_found=0, best_candidate=None, predecessor=predecessor, config=make_config())
+    result = classify(
+        first_seen_date="2026-08-20", postcode="NG17 3GA", candidates_found=0, best_candidate=None,
+        predecessor=predecessor, existing_operator=None, config=make_config(),
+    )
 
     assert result.classification == "OWNERSHIP_CHANGE"
     assert result.confidence == "HIGH"
@@ -140,8 +242,11 @@ def test_classify_ownership_change_without_company_match():
 
 
 def test_classify_new_venue_high_confidence():
-    candidate = make_candidate(score=0.95, high_density=False)
-    result = classify(postcode="NG17 3GA", candidates_found=1, best_candidate=candidate, predecessor=None, config=make_config())
+    candidate = make_candidate(score=0.95, high_density=False, date_of_creation="2026-08-01")
+    result = classify(
+        first_seen_date="2026-08-20", postcode="NG17 3GA", candidates_found=1, best_candidate=candidate,
+        predecessor=None, existing_operator=None, config=make_config(),
+    )
 
     assert result.classification == "NEW_VENUE"
     assert result.confidence == "HIGH"
@@ -149,8 +254,11 @@ def test_classify_new_venue_high_confidence():
 
 
 def test_classify_new_venue_high_density_downgrades_confidence():
-    candidate = make_candidate(score=0.9, high_density=True, count=8)  # high score but not near-exact
-    result = classify(postcode="NG17 3GA", candidates_found=1, best_candidate=candidate, predecessor=None, config=make_config())
+    candidate = make_candidate(score=0.9, high_density=True, count=8, date_of_creation="2026-08-01")
+    result = classify(
+        first_seen_date="2026-08-20", postcode="NG17 3GA", candidates_found=1, best_candidate=candidate,
+        predecessor=None, existing_operator=None, config=make_config(),
+    )
 
     assert result.classification == "NEW_VENUE"
     assert result.confidence == "LOW"
@@ -158,24 +266,33 @@ def test_classify_new_venue_high_density_downgrades_confidence():
 
 
 def test_classify_new_venue_near_exact_match_not_downgraded_despite_high_density():
-    candidate = make_candidate(score=1.0, high_density=True, count=8)
-    result = classify(postcode="NG17 3GA", candidates_found=1, best_candidate=candidate, predecessor=None, config=make_config())
+    candidate = make_candidate(score=1.0, high_density=True, count=8, date_of_creation="2026-08-01")
+    result = classify(
+        first_seen_date="2026-08-20", postcode="NG17 3GA", candidates_found=1, best_candidate=candidate,
+        predecessor=None, existing_operator=None, config=make_config(),
+    )
 
     assert result.classification == "NEW_VENUE"
-    assert result.confidence == "HIGH"  # exact name match survives despite shared address
+    assert result.confidence == "HIGH"
 
 
 def test_classify_new_venue_medium_confidence():
-    candidate = make_candidate(score=0.65, high_density=False)
-    result = classify(postcode="NG17 3GA", candidates_found=1, best_candidate=candidate, predecessor=None, config=make_config())
+    candidate = make_candidate(score=0.65, high_density=False, date_of_creation="2026-08-01")
+    result = classify(
+        first_seen_date="2026-08-20", postcode="NG17 3GA", candidates_found=1, best_candidate=candidate,
+        predecessor=None, existing_operator=None, config=make_config(),
+    )
 
     assert result.classification == "NEW_VENUE"
     assert result.confidence == "MEDIUM"
 
 
 def test_classify_new_venue_medium_score_high_density_downgrades_to_low():
-    candidate = make_candidate(score=0.65, high_density=True, count=6)
-    result = classify(postcode="NG17 3GA", candidates_found=1, best_candidate=candidate, predecessor=None, config=make_config())
+    candidate = make_candidate(score=0.65, high_density=True, count=6, date_of_creation="2026-08-01")
+    result = classify(
+        first_seen_date="2026-08-20", postcode="NG17 3GA", candidates_found=1, best_candidate=candidate,
+        predecessor=None, existing_operator=None, config=make_config(),
+    )
 
     assert result.classification == "NEW_VENUE"
     assert result.confidence == "LOW"
@@ -183,7 +300,10 @@ def test_classify_new_venue_medium_score_high_density_downgrades_to_low():
 
 def test_classify_unknown_weak_candidate_falls_below_threshold():
     candidate = make_candidate(score=0.3, high_density=False)
-    result = classify(postcode="NG17 3GA", candidates_found=3, best_candidate=candidate, predecessor=None, config=make_config())
+    result = classify(
+        first_seen_date="2026-08-20", postcode="NG17 3GA", candidates_found=3, best_candidate=candidate,
+        predecessor=None, existing_operator=None, config=make_config(),
+    )
 
     assert result.classification == "UNKNOWN"
     assert result.confidence == "LOW"
@@ -191,18 +311,104 @@ def test_classify_unknown_weak_candidate_falls_below_threshold():
 
 
 def test_classify_unknown_no_candidates_in_district():
-    result = classify(postcode="NG17 3GA", candidates_found=0, best_candidate=None, predecessor=None, config=make_config())
+    result = classify(
+        first_seen_date="2026-08-20", postcode="NG17 3GA", candidates_found=0, best_candidate=None,
+        predecessor=None, existing_operator=None, config=make_config(),
+    )
 
     assert result.classification == "UNKNOWN"
-    assert "postcode district" in result.reason
+    assert "No Companies House company found" in result.reason
 
 
 def test_classify_unknown_no_postcode():
-    result = classify(postcode=None, candidates_found=0, best_candidate=None, predecessor=None, config=make_config())
+    result = classify(
+        first_seen_date="2026-08-20", postcode=None, candidates_found=0, best_candidate=None,
+        predecessor=None, existing_operator=None, config=make_config(),
+    )
 
     assert result.classification == "UNKNOWN"
     assert "No postcode" in result.reason
 
+
+def test_classify_threshold_boundary_is_inclusive():
+    candidate_at_threshold = make_candidate(score=0.6, date_of_creation="2026-08-01")
+    result = classify(
+        first_seen_date="2026-08-20", postcode="NG17 3GA", candidates_found=1, best_candidate=candidate_at_threshold,
+        predecessor=None, existing_operator=None, config=make_config(),
+    )
+    assert result.classification == "NEW_VENUE"
+
+    candidate_just_below = make_candidate(score=0.59, date_of_creation="2026-08-01")
+    result = classify(
+        first_seen_date="2026-08-20", postcode="NG17 3GA", candidates_found=1, best_candidate=candidate_just_below,
+        predecessor=None, existing_operator=None, config=make_config(),
+    )
+    assert result.classification == "UNKNOWN"
+
+
+# --- incorporation-recency gate (Mamma Rosa case) ---
+
+def test_classify_new_venue_rejected_when_company_too_old():
+    """The Mamma Rosa case: real company, real strong name match, but
+    incorporated 18 months before the FHRS record -- not new-venue
+    evidence once collection covers full history."""
+    candidate = make_candidate(score=1.0, date_of_creation="2025-02-19")
+    result = classify(
+        first_seen_date="2026-08-21", postcode="N19 3NU", candidates_found=1, best_candidate=candidate,
+        predecessor=None, existing_operator=None, config=make_config(),
+    )
+
+    assert result.classification == "UNKNOWN"
+    assert result.confidence == "LOW"
+    assert "not within" in result.reason
+    assert result.evidence_company_number == candidate.company_number  # evidence kept even though rejected
+
+
+def test_classify_new_venue_accepted_at_exactly_max_age():
+    candidate = make_candidate(score=1.0, date_of_creation="2026-02-21")  # exactly 180 days before first_seen
+    result = classify(
+        first_seen_date="2026-08-20", postcode="N19 3NU", candidates_found=1, best_candidate=candidate,
+        predecessor=None, existing_operator=None, config=make_config(),
+    )
+    assert result.classification == "NEW_VENUE"
+
+
+def test_classify_new_venue_rejected_one_day_over_max_age():
+    candidate = make_candidate(score=1.0, date_of_creation="2026-02-20")  # 181 days before first_seen
+    result = classify(
+        first_seen_date="2026-08-20", postcode="N19 3NU", candidates_found=1, best_candidate=candidate,
+        predecessor=None, existing_operator=None, config=make_config(),
+    )
+    assert result.classification == "UNKNOWN"
+
+
+def test_classify_new_venue_rejected_when_no_creation_date():
+    candidate = make_candidate(score=1.0, date_of_creation=None)
+    result = classify(
+        first_seen_date="2026-08-20", postcode="N19 3NU", candidates_found=1, best_candidate=candidate,
+        predecessor=None, existing_operator=None, config=make_config(),
+    )
+    assert result.classification == "UNKNOWN"
+
+
+# --- existing-operator note in NEW_VENUE reason ---
+
+def test_classify_new_venue_notes_existing_operator():
+    candidate = make_candidate(score=1.0, date_of_creation="2026-08-01")
+    existing_operator = Predecessor(fhrsid=1, business_name="Soul Mama Islington", first_seen_date="2026-05-01", last_seen_date="2026-05-01")
+
+    result = classify(
+        first_seen_date="2026-10-15", postcode="E15 1XX", candidates_found=1, best_candidate=candidate,
+        predecessor=None, existing_operator=existing_operator, config=make_config(),
+    )
+
+    assert result.classification == "NEW_VENUE"
+    assert "Soul Mama Islington" in result.reason
+    assert "additional site" in result.reason
+    assert result.evidence_existing_operator_fhrsid == 1
+
+
+# --- integration proof of the "Stage 5 design commitment" ---
 
 def test_predecessor_lookup_works_against_establishment_with_zero_field_changed_events(tmp_path):
     """The "Stage 5 design commitment" this module exists to satisfy:
@@ -252,19 +458,10 @@ def test_predecessor_lookup_works_against_establishment_with_zero_field_changed_
         ).fetchall()
     ]
     index = build_address_index(establishments)
+    pc_index = build_postcode_index(establishments)
 
-    result = find_predecessor(2, "1 High Street", "NG17 3GA", "2026-08-23", index)
+    result = find_predecessor(2, "The New Castle", "1 High Street", "NG17 3GA", "2026-08-23", index, pc_index, 0.9)
 
     assert result is not None
     assert result.fhrsid == 1
     assert result.business_name == "The Old Castle"
-
-
-def test_classify_threshold_boundary_is_inclusive():
-    candidate_at_threshold = make_candidate(score=0.6)
-    result = classify(postcode="NG17 3GA", candidates_found=1, best_candidate=candidate_at_threshold, predecessor=None, config=make_config())
-    assert result.classification == "NEW_VENUE"
-
-    candidate_just_below = make_candidate(score=0.59)
-    result = classify(postcode="NG17 3GA", candidates_found=1, best_candidate=candidate_just_below, predecessor=None, config=make_config())
-    assert result.classification == "UNKNOWN"

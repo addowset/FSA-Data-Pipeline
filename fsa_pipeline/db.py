@@ -245,7 +245,9 @@ CREATE TABLE IF NOT EXISTS company_match_candidates (
     name_similarity_score REAL NOT NULL,
     postcode_district TEXT NOT NULL,
     address_company_count INTEGER NOT NULL,
-    is_high_density_address INTEGER NOT NULL
+    is_high_density_address INTEGER NOT NULL,
+    match_strategy TEXT NOT NULL DEFAULT 'district',
+    date_of_creation TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_company_match_candidates_fhrsid
     ON company_match_candidates(fhrsid, insert_collection_date);
@@ -291,6 +293,7 @@ CREATE TABLE IF NOT EXISTS classifications (
     reason TEXT NOT NULL,
     evidence_company_number TEXT,
     evidence_predecessor_fhrsid INTEGER,
+    evidence_existing_operator_fhrsid INTEGER,
     classified_at TEXT NOT NULL,
     UNIQUE(fhrsid, insert_collection_date)
 );
@@ -306,6 +309,19 @@ _ESTABLISHMENTS_CURRENT_MIGRATIONS = {
     "postcode_source": "TEXT",
     "postcode_from_live_api": "TEXT",
     "postcode_backfill_checked_at": "TEXT",
+}
+
+# Same situation, added 2026-08-28 for the national name-match channel
+# (fsa_pipeline/matcher.py) and the NEW_VENUE incorporation-recency gate
+# (fsa_pipeline/classifier.py).
+_COMPANY_MATCH_CANDIDATES_MIGRATIONS = {
+    "match_strategy": "TEXT NOT NULL DEFAULT 'district'",
+    "date_of_creation": "TEXT",
+}
+
+# Same situation, added 2026-08-28 for the existing-operator flag.
+_CLASSIFICATIONS_MIGRATIONS = {
+    "evidence_existing_operator_fhrsid": "INTEGER",
 }
 
 
@@ -332,6 +348,8 @@ def connect(db_path: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode = WAL")
     conn.executescript(SCHEMA)
     _ensure_columns(conn, "establishments_current", _ESTABLISHMENTS_CURRENT_MIGRATIONS)
+    _ensure_columns(conn, "company_match_candidates", _COMPANY_MATCH_CANDIDATES_MIGRATIONS)
+    _ensure_columns(conn, "classifications", _CLASSIFICATIONS_MIGRATIONS)
     return conn
 
 
@@ -673,13 +691,14 @@ def record_match(
             """
             INSERT INTO company_match_candidates
                 (fhrsid, insert_collection_date, rank, company_number, company_name,
-                 name_similarity_score, postcode_district, address_company_count, is_high_density_address)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 name_similarity_score, postcode_district, address_company_count, is_high_density_address,
+                 match_strategy, date_of_creation)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (fhrsid, insert_collection_date, rank, c.company_number, c.company_name,
                  c.name_similarity_score, c.postcode_district, c.address_company_count,
-                 int(c.is_high_density_address))
+                 int(c.is_high_density_address), c.match_strategy, c.date_of_creation)
                 for rank, c in enumerate(candidates, start=1)
             ],
         )
@@ -801,19 +820,21 @@ def record_classification(
         """
         INSERT INTO classifications
             (fhrsid, authority_code, insert_collection_date, classification, confidence, reason,
-             evidence_company_number, evidence_predecessor_fhrsid, classified_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             evidence_company_number, evidence_predecessor_fhrsid, evidence_existing_operator_fhrsid, classified_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(fhrsid, insert_collection_date) DO UPDATE SET
             classification = excluded.classification,
             confidence = excluded.confidence,
             reason = excluded.reason,
             evidence_company_number = excluded.evidence_company_number,
             evidence_predecessor_fhrsid = excluded.evidence_predecessor_fhrsid,
+            evidence_existing_operator_fhrsid = excluded.evidence_existing_operator_fhrsid,
             classified_at = excluded.classified_at
         """,
         (
             fhrsid, authority_code, insert_collection_date, result.classification, result.confidence,
-            result.reason, result.evidence_company_number, result.evidence_predecessor_fhrsid, classified_at,
+            result.reason, result.evidence_company_number, result.evidence_predecessor_fhrsid,
+            result.evidence_existing_operator_fhrsid, classified_at,
         ),
     )
     conn.commit()

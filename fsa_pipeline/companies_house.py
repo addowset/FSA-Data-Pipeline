@@ -81,20 +81,94 @@ def incorporated_date_window(config: Config, as_of: dt.date) -> tuple[str, str]:
     return incorporated_from.isoformat(), as_of.isoformat()
 
 
+# Confirmed by direct testing 2026-08-29, not documented anywhere found:
+# Advanced Search enforces start_index + size <= 10,000 for any single
+# query (exact boundary -- 9999+1 succeeds, 10000+1 returns HTTP 500),
+# the classic Elasticsearch default max_result_window. No page size or
+# retry strategy gets past this; a query with more matches than that is
+# fundamentally unreachable via offset pagination alone. The fix is to
+# slice the query by date range, recursively, until every slice's own
+# hit count is safely under the ceiling, then paginate normally within
+# each slice. See compute_date_slices.
+MAX_RESULT_WINDOW = 10_000
+SAFE_SLICE_SIZE = 9_000  # margin below the hard ceiling
+EARLIEST_PLAUSIBLE_INCORPORATION_DATE = dt.date(1900, 1, 1)
+
+
+def fetch_hits_count(session: requests.Session, config: Config, incorporated_from: str | None, incorporated_to: str | None) -> int:
+    """A cheap size=1 request purely to learn how many results a date
+    range would return, for compute_date_slices."""
+    params = {**_base_params(config), "size": 1, "start_index": 0}
+    if incorporated_from is not None:
+        params["incorporated_from"] = incorporated_from
+    if incorporated_to is not None:
+        params["incorporated_to"] = incorporated_to
+    response = session.get(config.ch_advanced_search_url, params=params, timeout=config.ch_timeout_seconds)
+    response.raise_for_status()
+    return hits_from_page_bytes(response.content)
+
+
+def compute_date_slices(
+    session: requests.Session,
+    config: Config,
+    incorporated_from: str | None,
+    incorporated_to: str | None,
+) -> list[tuple[str, str, int]]:
+    """Recursively bisects [incorporated_from, incorporated_to] until
+    every slice's hit count is safely under MAX_RESULT_WINDOW. Returns
+    (from, to, hits) tuples covering the whole range with no gaps or
+    overlaps. incorporated_from=None means EARLIEST_PLAUSIBLE_INCORPORATION_DATE;
+    incorporated_to=None means today."""
+    from_date = dt.date.fromisoformat(incorporated_from) if incorporated_from else EARLIEST_PLAUSIBLE_INCORPORATION_DATE
+    to_date = dt.date.fromisoformat(incorporated_to) if incorporated_to else dt.date.today()
+
+    hits = fetch_hits_count(session, config, from_date.isoformat(), to_date.isoformat())
+
+    if hits <= SAFE_SLICE_SIZE:
+        return [(from_date.isoformat(), to_date.isoformat(), hits)] if hits > 0 else []
+
+    if from_date >= to_date:
+        # Can't bisect a single day any further -- extremely unlikely for
+        # a SIC-filtered slice, but if it happens, this slice's tail
+        # beyond the ceiling is simply unreachable via this API. Return
+        # it anyway so the caller can at least fetch what it can and log
+        # the shortfall, rather than silently dropping the day.
+        return [(from_date.isoformat(), to_date.isoformat(), hits)]
+
+    midpoint = from_date + (to_date - from_date) // 2
+    left = compute_date_slices(session, config, from_date.isoformat(), midpoint.isoformat())
+    right = compute_date_slices(session, config, (midpoint + dt.timedelta(days=1)).isoformat(), to_date.isoformat())
+    return left + right
+
+
+def _base_params(config: Config) -> dict:
+    """sic_codes + company_status=active, shared by every query. Active-
+    only decided with the user 2026-08-29: a dissolved company from
+    decades ago can't plausibly be the match for a business that just
+    registered with FSA, OWNERSHIP_CHANGE detection doesn't need it
+    either (that's entirely FHRS-side, see classifier.py), and including
+    dissolved companies would have meant fetching 641,539 records instead
+    of ~260,000 for no matching benefit -- pure false-positive risk for
+    the national name-match channel plus 2.5x the storage/search cost."""
+    return {"sic_codes": ",".join(config.ch_sic_codes), "company_status": "active"}
+
+
 def fetch_page(
     session: requests.Session,
     config: Config,
-    incorporated_from: str,
-    incorporated_to: str,
+    incorporated_from: str | None,
+    incorporated_to: str | None,
     start_index: int,
 ) -> bytes:
-    params = {
-        "sic_codes": ",".join(config.ch_sic_codes),
-        "incorporated_from": incorporated_from,
-        "incorporated_to": incorporated_to,
-        "size": config.ch_page_size,
-        "start_index": start_index,
-    }
+    """incorporated_from/incorporated_to are None for a full-history fetch
+    (no date bound at all) -- used for the one-time backfill, see
+    scripts/collect_companies_house.py --full-history. The Advanced
+    Search API treats an omitted bound as "no limit" on that side."""
+    params = {**_base_params(config), "size": config.ch_page_size, "start_index": start_index}
+    if incorporated_from is not None:
+        params["incorporated_from"] = incorporated_from
+    if incorporated_to is not None:
+        params["incorporated_to"] = incorporated_to
     response = session.get(config.ch_advanced_search_url, params=params, timeout=config.ch_timeout_seconds)
     response.raise_for_status()
     content = response.content

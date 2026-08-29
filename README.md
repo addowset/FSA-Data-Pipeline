@@ -142,6 +142,72 @@ name match is near-exact. Run against all 1,709 real INSERT events:
 **136 OWNERSHIP_CHANGE, 8 NEW_VENUE (3 HIGH, 5 MEDIUM), 1,565 UNKNOWN**.
 23 new tests, all passing.
 
+**Ground-truth-driven fix batch (2026-08-28/29)** — the user hand-checked
+5 real matcher/classifier outputs against manual research (Google,
+Companies House's own search) before committing to the 75-row ground
+truth set, and found 3 distinct real bugs, not just noise:
+
+1. **District-only candidate search missed formation-agent registrations.**
+   "Soul Mama Islington" (trades N1) and "Mamma Rosa London" (trades N19)
+   were both registered via addresses in a completely different postcode
+   district — invisible to district search regardless of tuning. Fixed
+   with a second, independent national name-match channel (≥0.9
+   similarity, blocked by first word for tractability against a
+   quarter-million-company pool).
+2. **Address-history matching required an exact `address_line_1`.**
+   Missed a genuine "Rassau Fish Bar" replaced by a new FHRSID also named
+   "Rassau Fish Bar" at the identical postcode, because the newer
+   record's `address_line_1` was null. Fixed with a fallback to postcode
+   + near-exact name (≥0.9) when either side is missing.
+3. **No incorporation-recency check.** Necessary once Companies House
+   collection widened to full history (below) — an 18-month-old company
+   ("Mamma Rosa London") would otherwise wrongly count as `NEW_VENUE`
+   just for having no FHRS predecessor. Fixed with a 180-day gate (the
+   user's reasoning: "someone can have a great idea, get enthusiastic and
+   create a company well before actually starting the business — could
+   easily be a year," 180 days chosen as deliberately generous).
+
+Also added: an "existing operator, additional venue" flag (a company
+already linked to an earlier FHRSID gets noted in the reason rather than
+silently read as a first-time venue — the "Soul Mama Stratford" case,
+where a second site opens under the *same* company, not a new one), and
+a short review-queue log for `NEW_VENUE`/`MEDIUM` classifications
+(user's request: "as hands-off as possible... but early on, a list of
+companies where the match certainty is worth me checking manually" — a
+log file, not email, see "Design notes" for why).
+
+Fix 1 required widening Companies House collection from the rolling
+14-day window to a one-time full-history pull (`collect_companies_house.py
+--full-history`) — real ground-truth misses were 5 months, 18 months,
+and 6 years old, no rolling window would ever have been wide enough.
+This surfaced a genuine, previously-undocumented API limitation: **the
+Advanced Search endpoint enforces `start_index + size <= 10,000` per
+query** (confirmed to the exact boundary — 9999+1 succeeds, 10000+1
+returns HTTP 500), the classic Elasticsearch default `max_result_window`.
+No page size or retry strategy gets past it; an unbounded query is
+fundamentally capped at the first 10,000 matches. The first attempt at
+this (an overnight run with plain offset pagination) ran into exactly
+that wall after ~132,000 records and failed. Fixed with
+`compute_date_slices` — recursively bisects the date range until every
+slice's own hit count is safely under the ceiling, then paginates
+normally within each slice. Also filtered to `company_status=active`
+(confirmed with the user first): unfiltered was 641,539 companies
+including everything dissolved back to 1900, active-only is 260,006 —
+2.5x less to fetch/store/search, no loss of matching value (a dissolved
+company can't be the match for something that just registered with FSA).
+
+Re-verified all 5 ground-truth examples after the fix + full rebuild:
+every one now resolves correctly — Soul Mama and Rassau went from
+`UNKNOWN` to correctly-matched (`NEW_VENUE`/HIGH and
+`OWNERSHIP_CHANGE`/HIGH respectively); Mamma Rosa and Breakfast Club
+stayed `UNKNOWN` but now with real evidence explaining why (matched a
+real company, but it's years old) instead of just "no good candidate
+nearby"; Oliveira's stayed correctly unmatched despite the 260K-company
+pool, no new false positive introduced. Nationally, across all 2,966
+INSERT events accumulated so far: **200 NEW_VENUE** (151 HIGH, 40
+MEDIUM, 9 LOW, up from 8 before this fix batch), **308 OWNERSHIP_CHANGE**
+(up from 136), **2,458 UNKNOWN**. 44 new tests, 141 total passing.
+
 Not yet built: metrics/monitoring, CSV export.
 
 Live-API collection for priority authorities (the original South West
@@ -225,6 +291,23 @@ Writes to `raw/companies-house/<today>/` and logs to
 Needs `COMPANIES_HOUSE_API_KEY` — set in the local `.env` file (see
 "Design notes"; register for a free key at
 [developer.company-information.service.gov.uk](https://developer.company-information.service.gov.uk)).
+
+**One-time full-history backfill** (already run 2026-08-29; only needed
+again if the database is fully rebuilt and `raw/companies-house/` is
+somehow unavailable, or if you want to re-pull from scratch):
+
+```bash
+python scripts/collect_companies_house.py --full-history
+```
+
+Pulls every active company matching the SIC codes regardless of
+incorporation date (~260K), date-sliced to work around the Advanced
+Search API's undocumented 10,000-result pagination ceiling — see "Status"
+above and "Design notes" for the full story. Writes to
+`fullhistory_<slice-from>_<slice-to>_page_NNNN.json.gz` in the same dated
+directory as the regular run, so the two never collide. Takes roughly
+10 minutes; `rebuild_db.py` will replay it automatically afterwards
+(picked up by `parse_companies_house.py`'s glob, same as regular pages).
 
 ## Running the matcher
 
@@ -321,6 +404,8 @@ raw/                  raw archive, gitignored — this is the asset, back it up 
     _query.json                  the exact sic_codes/date-range parameters requested
     _manifest.json               per-run summary: hits, pages, failures
     page_NNNN.json.gz            one gzip-compressed raw Advanced Search response page
+    _manifest_fullhistory.json           one-time full-history backfill summary, if run
+    fullhistory_<from>_<to>_page_NNNN.json.gz   one date-sliced backfill page, if run
   fhrs-live/<date>/   one dated directory per postcode-backfill run
     <code>_page_NNNN.json.gz     one gzip-compressed raw live-API response page per authority
 logs/                 per-run logs, gitignored
@@ -481,6 +566,20 @@ and confirms the lookup still finds it.
   without discarding a genuinely strong *name* match that happens to
   share a formation agent with other companies (plausible for a small
   independent business that also outsources its accounts).
+- **Companies House Advanced Search has a hard, undocumented 10,000-result
+  pagination ceiling** -- confirmed by direct testing 2026-08-29, not
+  found in any documentation consulted: `start_index + size` cannot
+  exceed 10,000 for a single query, to the exact boundary (`9999+1`
+  succeeds, `10000+1` returns HTTP 500, consistently, not flaky). This is
+  the standard default `max_result_window` for an Elasticsearch-backed
+  search index, and it means a query with more matches than that is
+  fundamentally unreachable via offset pagination alone -- no page size,
+  retry count, or patience gets past it. `compute_date_slices`
+  (`fsa_pipeline/companies_house.py`) works around this by recursively
+  bisecting the requested date range until every slice's own hit count
+  is safely under the ceiling (9,000, leaving margin), then paginating
+  normally within each slice. Anyone else hitting deep pagination on this
+  API should assume the same ceiling applies.
 - **The live FHRS API was investigated as a bulk-collection replacement
   and rejected, but repurposed for postcode backfill.** The user asked
   whether it could fix authority staleness (26 authorities over a week

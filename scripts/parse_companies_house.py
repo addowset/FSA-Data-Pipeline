@@ -3,9 +3,11 @@
 
 Reads raw/companies-house/<date>/ (written by collect_companies_house.py),
 which must already exist -- this script never fetches anything over the
-network. Reads every page_NNNN.json.gz for the date, parses each item,
-and upserts companies_current / appends to company_observations (see
-fsa_pipeline/db.py's dedup-on-write design, same pattern as FHRS).
+network. Reads every page_NNNN.json.gz AND fullhistory_<from>_<to>_page_NNNN.json.gz
+(the one-time backfill's date-sliced pages, if present -- see
+collect_companies_house.py --full-history) for the date, parses each
+item, and upserts companies_current / appends to company_observations
+(see fsa_pipeline/db.py's dedup-on-write design, same pattern as FHRS).
 
 Idempotent by default: a date already successfully parsed is skipped.
 Pass --force to reparse anyway.
@@ -45,7 +47,7 @@ def run(date_str: str, force: bool) -> int:
         return 0
 
     day_path = config.ch_raw_dir / date_str
-    page_paths = sorted(day_path.glob("page_*.json.gz"))
+    page_paths = sorted(day_path.glob("page_*.json.gz")) + sorted(day_path.glob("fullhistory_*_page_*.json.gz"))
 
     if not page_paths:
         logger.error("no raw pages found for %s at %s -- run collect_companies_house.py first", date_str, day_path)

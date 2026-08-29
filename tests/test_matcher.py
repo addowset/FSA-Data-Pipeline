@@ -1,7 +1,10 @@
 from fsa_pipeline.matcher import (
     build_address_density,
     build_companies_by_district,
+    build_companies_by_first_word,
     find_candidates,
+    find_national_candidates,
+    merge_candidates,
     name_similarity,
     normalize_company_name,
     normalize_postcode_district,
@@ -140,3 +143,103 @@ def test_find_candidates_respects_top_n():
 
     candidates = find_candidates("Restaurant", "NG17 3GA", by_district, density, high_density_threshold=5, top_n=3)
     assert len(candidates) == 3
+
+
+# --- national name-match channel (Soul Mama / Mamma Rosa case) ---
+
+def test_build_companies_by_first_word_blocks_correctly():
+    companies = [
+        make_company("1", "Soul Mama Islington Limited", "71-75 Shelton Street", "WC2H 9JQ"),
+        make_company("2", "Mamma Rosa London Limited", "5 Flat 5c Chesterfield Mews", "N4 1LH"),
+    ]
+    index = build_companies_by_first_word(companies)
+    assert {c["company_number"] for c in index["SOUL"]} == {"1"}
+    assert {c["company_number"] for c in index["MAMMA"]} == {"2"}
+
+
+def test_find_national_candidates_finds_formation_agent_registered_company():
+    """The real bug: a company registered via a formation agent in a
+    completely different postcode district to where it trades --
+    invisible to district search no matter the threshold."""
+    companies = [make_company("17102443", "SOUL MAMA ISLINGTON LIMITED", "71-75 Shelton Street", "WC2H 9JQ")]
+    by_first_word = build_companies_by_first_word(companies)
+    density = build_address_density(companies)
+
+    # The FHRS establishment trades from N1, nowhere near WC2H -- district
+    # search would never find this; national search doesn't care.
+    candidates = find_national_candidates("Soul Mama Islington", by_first_word, density, 5, threshold=0.9, top_n=5)
+
+    assert len(candidates) == 1
+    assert candidates[0].company_number == "17102443"
+    assert candidates[0].match_strategy == "national"
+    assert candidates[0].name_similarity_score == 1.0
+
+
+def test_find_national_candidates_respects_threshold():
+    companies = [make_company("1", "Soul Mama Somewhere Else Entirely Ltd", "1 Road", "AB1 1AA")]
+    by_first_word = build_companies_by_first_word(companies)
+    density = build_address_density(companies)
+
+    candidates = find_national_candidates("Soul Mama Islington", by_first_word, density, 5, threshold=0.9, top_n=5)
+    assert candidates == []  # shares first word but not similar enough overall
+
+
+def test_find_national_candidates_empty_when_no_first_word_match():
+    companies = [make_company("1", "Totally Different Name Ltd", "1 Road", "AB1 1AA")]
+    by_first_word = build_companies_by_first_word(companies)
+    density = build_address_density(companies)
+
+    candidates = find_national_candidates("Soul Mama Islington", by_first_word, density, 5, threshold=0.9, top_n=5)
+    assert candidates == []
+
+
+def test_find_national_candidates_carries_date_of_creation():
+    company = make_company("1", "Soul Mama Islington Limited", "71-75 Shelton Street", "WC2H 9JQ")
+    company["date_of_creation"] = "2026-03-19"
+    by_first_word = build_companies_by_first_word([company])
+    density = build_address_density([company])
+
+    candidates = find_national_candidates("Soul Mama Islington", by_first_word, density, 5, threshold=0.9, top_n=5)
+    assert candidates[0].date_of_creation == "2026-03-19"
+
+
+# --- merging both channels ---
+
+def test_merge_candidates_deduplicates_by_company_number_keeping_higher_score():
+    from fsa_pipeline.matcher import Candidate
+
+    district = [Candidate(company_number="1", company_name="A", name_similarity_score=0.5,
+                           postcode_district="NG17", address_company_count=1, is_high_density_address=False,
+                           match_strategy="district")]
+    national = [Candidate(company_number="1", company_name="A", name_similarity_score=0.95,
+                           postcode_district="", address_company_count=1, is_high_density_address=False,
+                           match_strategy="national")]
+
+    merged = merge_candidates(district, national, top_n=5)
+    assert len(merged) == 1
+    assert merged[0].match_strategy == "national"
+    assert merged[0].name_similarity_score == 0.95
+
+
+def test_merge_candidates_combines_distinct_companies_and_sorts():
+    from fsa_pipeline.matcher import Candidate
+
+    district = [Candidate(company_number="1", company_name="A", name_similarity_score=0.4,
+                           postcode_district="NG17", address_company_count=1, is_high_density_address=False)]
+    national = [Candidate(company_number="2", company_name="B", name_similarity_score=0.95,
+                           postcode_district="", address_company_count=1, is_high_density_address=False,
+                           match_strategy="national")]
+
+    merged = merge_candidates(district, national, top_n=5)
+    assert [c.company_number for c in merged] == ["2", "1"]  # highest score first
+
+
+def test_merge_candidates_respects_top_n():
+    from fsa_pipeline.matcher import Candidate
+
+    district = [Candidate(company_number=str(i), company_name="A", name_similarity_score=0.1 * i,
+                           postcode_district="NG17", address_company_count=1, is_high_density_address=False)
+                for i in range(10)]
+
+    merged = merge_candidates(district, [], top_n=3)
+    assert len(merged) == 3
