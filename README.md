@@ -208,6 +208,22 @@ INSERT events accumulated so far: **200 NEW_VENUE** (151 HIGH, 40
 MEDIUM, 9 LOW, up from 8 before this fix batch), **308 OWNERSHIP_CHANGE**
 (up from 136), **2,458 UNKNOWN**. 44 new tests, 141 total passing.
 
+**Name-similarity rework (2026-09-01)** — a follow-up spot-check of the
+Rassau Fish Bar case (above) found the matcher's top-ranked company was
+still wrong: `difflib.SequenceMatcher` scored "KHAN SONS FISH BAR LTD"
+(shares only the generic phrase "FISH BAR") above "RASSAU TRADING LTD"
+(shares the distinctive proper noun "RASSAU"), because raw character
+overlap can't tell a word shared by thousands of companies from one
+shared by one. Replaced with IDF word-weighting (each shared word scored
+by how rare it is across the ~260K-company pool) — see "Design notes"
+for the full write-up, the worked example, and a serious performance bug
+(an O(vocabulary) scan hidden inside the per-comparison scoring function)
+caught and fixed along the way, which had a live rematch run still going
+after 3.5 hours before being killed and diagnosed. Fixed version: full
+rematch + reclassify of all 3,642 accumulated INSERT events in under 70
+seconds combined. Existing 0.6/0.85 thresholds checked against the new
+score distribution and kept unchanged. 142 tests passing.
+
 Not yet built: metrics/monitoring, CSV export.
 
 Live-API collection for priority authorities (the original South West
@@ -551,14 +567,50 @@ and confirms the lookup still finds it.
   data: one address (a known company-formation service) hosts 31 of our
   1,993 companies, three addresses host 10+. Company names are normalized
   (uppercased, legal suffixes like LTD/LIMITED/LLP stripped, punctuation
-  removed) before scoring with `difflib.SequenceMatcher` -- simple,
-  stdlib, no new dependency, and good enough to find 3 exact matches and
-  10 more at 0.5+ similarity out of 887 real INSERT events on first run.
-  Known rough edge: `SequenceMatcher` can give a misleadingly moderate
-  score to names that share a common word ("Group", "Catering") but
-  aren't the same business at all -- this is exactly why the matcher
-  stores ranked evidence with scores rather than a bare yes/no, leaving
-  the actual confidence judgement to stage 5.
+  removed) before scoring. Originally scored with `difflib.SequenceMatcher`
+  -- simple, stdlib, no new dependency, and good enough to find 3 exact
+  matches and 10 more at 0.5+ similarity out of 887 real INSERT events on
+  first run. The docstring here used to flag a "known rough edge" --
+  `SequenceMatcher` giving a misleadingly moderate score to names sharing
+  a common word -- as a tolerable trade-off left to stage 5's judgement.
+  It wasn't tolerable: it was a real bug (see the next bullet).
+- **Name-similarity scoring replaced with IDF word weighting
+  (2026-09-01).** The rough edge above turned out to actively invert
+  rankings. Real case: for "Rassau Fish Bar", `SequenceMatcher` scored
+  "KHAN SONS FISH BAR LTD" (shares only the generic phrase "FISH BAR") at
+  0.73, *above* "RASSAU TRADING LTD" (shares the distinctive proper noun
+  "RASSAU") at 0.55 -- the wrong company won purely because character-level
+  matching has no notion that "FISH BAR" is shared by thousands of
+  companies while "RASSAU" appears in exactly 1 of 260,162. Fixed with
+  `build_word_idf`/`WordIdf` (`fsa_pipeline/matcher.py`): each shared word
+  is weighted by inverse document frequency across the company pool, so a
+  shared rare word dominates a shared generic one instead of losing on raw
+  character count. After the fix, "RASSAU TRADING LTD" correctly ranks
+  #1 (0.47) over "KHAN SONS FISH BAR LTD" (0.25). Score distribution
+  shifted meaningfully lower and more bimodal (median dropped to a 0.12
+  noise floor; real matches cluster near 1.0, 467/2,593 exact word-set
+  matches) -- checked against the existing 0.6/0.85 thresholds before
+  reusing them rather than guessing, and they still land in sensible
+  places, so were kept unchanged. Reclassifying all 3,642 accumulated
+  INSERT events: NEW_VENUE 236 -> 184 (more conservative, as expected once
+  generic shared words stop inflating borderline matches), OWNERSHIP_CHANGE
+  345 -> 344, UNKNOWN 3061 -> 3114.
+  **Incident (2026-09-01):** the first implementation recomputed
+  `max(idf.values())` -- a scan over the full ~105,000-word vocabulary --
+  on *every single comparison* instead of once. For a business name
+  starting with "The" (a 15,918-company national-search bucket), that's
+  billions of redundant scans for one FHRS event; a rematch that should
+  take under a minute was still running after 3.5 hours before being
+  caught and killed. Fixed by precomputing that default once per run
+  (the `WordIdf` dataclass carries it alongside the per-word weights) --
+  1173us -> 8.5us per comparison (~140x), full rematch + reclassify of
+  all 3,642 events back under 70 seconds combined. Lesson: an aggregate
+  computed inside a per-pair scoring function is a trap that character-
+  level scoring never had, precisely because `SequenceMatcher` never
+  needed a corpus-wide statistic in the first place -- worth double-
+  checking complexity by hand whenever a new "score every candidate"
+  path touches something that isn't purely local to the pair being
+  compared.
 - **Address density is evidence, not a filter.** A candidate at a
   high-density address isn't excluded or down-weighted in the matcher
   itself -- it's flagged (`is_high_density_address`) so stage 5's

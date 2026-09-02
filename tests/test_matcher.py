@@ -1,7 +1,9 @@
 from fsa_pipeline.matcher import (
+    EMPTY_IDF,
     build_address_density,
     build_companies_by_district,
     build_companies_by_first_word,
+    build_word_idf,
     find_candidates,
     find_national_candidates,
     merge_candidates,
@@ -43,21 +45,41 @@ def test_normalize_company_name_handles_none_and_empty():
     assert normalize_company_name("") == ""
 
 
+def test_build_word_idf_weights_rare_words_above_common_ones():
+    """The real bug this replaced raw-character scoring for: "Rassau Fish
+    Bar" vs "KHAN SONS FISH BAR LTD" (shares only the generic "FISH BAR")
+    should score below "RASSAU TRADING LTD" (shares the rare proper noun
+    "RASSAU") once shared words are weighted by rarity, not just counted."""
+    companies = [
+        make_company("1", "Khan Sons Fish Bar Ltd", "1 Rd", "NP23 5AA"),
+        make_company("2", "Rassau Trading Ltd", "2 Rd", "NP23 5AA"),
+        make_company("3", "Some Fish Bar Ltd", "3 Rd", "NP23 5AA"),
+        make_company("4", "Another Fish Bar Ltd", "4 Rd", "NP23 5AA"),
+    ]
+    idf = build_word_idf(companies)
+    target = normalize_company_name("Rassau Fish Bar")
+
+    khan_score = name_similarity(target, normalize_company_name("Khan Sons Fish Bar Ltd"), idf)
+    rassau_score = name_similarity(target, normalize_company_name("Rassau Trading Ltd"), idf)
+
+    assert rassau_score > khan_score
+
+
 def test_name_similarity_identical_after_normalization():
     a = normalize_company_name("The Cob Kings")
     b = normalize_company_name("THE COB KINGS LTD")
-    assert name_similarity(a, b) == 1.0
+    assert name_similarity(a, b, EMPTY_IDF) == 1.0
 
 
-def test_name_similarity_unrelated_names_score_low():
+def test_name_similarity_unrelated_names_score_zero():
     a = normalize_company_name("The Cob Kings")
     b = normalize_company_name("Greenacre FZCO Ltd")
-    assert name_similarity(a, b) < 0.4
+    assert name_similarity(a, b, EMPTY_IDF) == 0.0  # no shared words at all
 
 
 def test_name_similarity_empty_strings_score_zero():
-    assert name_similarity("", "SOMETHING") == 0.0
-    assert name_similarity("SOMETHING", "") == 0.0
+    assert name_similarity("", "SOMETHING", EMPTY_IDF) == 0.0
+    assert name_similarity("SOMETHING", "", EMPTY_IDF) == 0.0
 
 
 def make_company(number, name, address_line_1, postal_code):
@@ -100,10 +122,11 @@ def test_find_candidates_ranks_by_similarity_and_flags_high_density():
     ]
     by_district = build_companies_by_district(companies)
     density = build_address_density(companies)
+    idf = build_word_idf(companies)
 
     candidates = find_candidates(
         "The Cob Kings", "NG17 3GA", by_district, density,
-        high_density_threshold=5, top_n=5,
+        high_density_threshold=5, idf=idf, top_n=5,
     )
 
     assert len(candidates) == 2  # only the two in NG17
@@ -116,10 +139,11 @@ def test_find_candidates_flags_high_density_address():
     companies = [make_company(str(i), f"Company {i} Ltd", "71-75 Shelton Street", "WC2H 9JQ") for i in range(6)]
     by_district = build_companies_by_district(companies)
     density = build_address_density(companies)
+    idf = build_word_idf(companies)
 
     candidates = find_candidates(
         "Company 0", "WC2H 9JQ", by_district, density,
-        high_density_threshold=5, top_n=5,
+        high_density_threshold=5, idf=idf, top_n=5,
     )
 
     assert candidates[0].is_high_density_address is True
@@ -127,12 +151,12 @@ def test_find_candidates_flags_high_density_address():
 
 
 def test_find_candidates_returns_empty_for_unmatched_district():
-    candidates = find_candidates("Anything", "ZZ99 9ZZ", {}, {}, high_density_threshold=5, top_n=5)
+    candidates = find_candidates("Anything", "ZZ99 9ZZ", {}, {}, high_density_threshold=5, idf=EMPTY_IDF, top_n=5)
     assert candidates == []
 
 
 def test_find_candidates_returns_empty_for_missing_postcode():
-    candidates = find_candidates("Anything", None, {"NG17": []}, {}, high_density_threshold=5, top_n=5)
+    candidates = find_candidates("Anything", None, {"NG17": []}, {}, high_density_threshold=5, idf=EMPTY_IDF, top_n=5)
     assert candidates == []
 
 
@@ -140,8 +164,9 @@ def test_find_candidates_respects_top_n():
     companies = [make_company(str(i), f"Restaurant {i}", "Some Rd", "NG17 3GA") for i in range(10)]
     by_district = build_companies_by_district(companies)
     density = build_address_density(companies)
+    idf = build_word_idf(companies)
 
-    candidates = find_candidates("Restaurant", "NG17 3GA", by_district, density, high_density_threshold=5, top_n=3)
+    candidates = find_candidates("Restaurant", "NG17 3GA", by_district, density, high_density_threshold=5, idf=idf, top_n=3)
     assert len(candidates) == 3
 
 
@@ -164,10 +189,11 @@ def test_find_national_candidates_finds_formation_agent_registered_company():
     companies = [make_company("17102443", "SOUL MAMA ISLINGTON LIMITED", "71-75 Shelton Street", "WC2H 9JQ")]
     by_first_word = build_companies_by_first_word(companies)
     density = build_address_density(companies)
+    idf = build_word_idf(companies)
 
     # The FHRS establishment trades from N1, nowhere near WC2H -- district
     # search would never find this; national search doesn't care.
-    candidates = find_national_candidates("Soul Mama Islington", by_first_word, density, 5, threshold=0.9, top_n=5)
+    candidates = find_national_candidates("Soul Mama Islington", by_first_word, density, 5, threshold=0.9, idf=idf, top_n=5)
 
     assert len(candidates) == 1
     assert candidates[0].company_number == "17102443"
@@ -179,8 +205,9 @@ def test_find_national_candidates_respects_threshold():
     companies = [make_company("1", "Soul Mama Somewhere Else Entirely Ltd", "1 Road", "AB1 1AA")]
     by_first_word = build_companies_by_first_word(companies)
     density = build_address_density(companies)
+    idf = build_word_idf(companies)
 
-    candidates = find_national_candidates("Soul Mama Islington", by_first_word, density, 5, threshold=0.9, top_n=5)
+    candidates = find_national_candidates("Soul Mama Islington", by_first_word, density, 5, threshold=0.9, idf=idf, top_n=5)
     assert candidates == []  # shares first word but not similar enough overall
 
 
@@ -188,8 +215,9 @@ def test_find_national_candidates_empty_when_no_first_word_match():
     companies = [make_company("1", "Totally Different Name Ltd", "1 Road", "AB1 1AA")]
     by_first_word = build_companies_by_first_word(companies)
     density = build_address_density(companies)
+    idf = build_word_idf(companies)
 
-    candidates = find_national_candidates("Soul Mama Islington", by_first_word, density, 5, threshold=0.9, top_n=5)
+    candidates = find_national_candidates("Soul Mama Islington", by_first_word, density, 5, threshold=0.9, idf=idf, top_n=5)
     assert candidates == []
 
 
@@ -198,8 +226,9 @@ def test_find_national_candidates_carries_date_of_creation():
     company["date_of_creation"] = "2026-03-19"
     by_first_word = build_companies_by_first_word([company])
     density = build_address_density([company])
+    idf = build_word_idf([company])
 
-    candidates = find_national_candidates("Soul Mama Islington", by_first_word, density, 5, threshold=0.9, top_n=5)
+    candidates = find_national_candidates("Soul Mama Islington", by_first_word, density, 5, threshold=0.9, idf=idf, top_n=5)
     assert candidates[0].date_of_creation == "2026-03-19"
 
 

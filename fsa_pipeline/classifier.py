@@ -117,6 +117,7 @@ def find_predecessor(
     first_seen_date: str,
     address_index: dict,
     postcode_index: dict,
+    idf: dict[str, float],
     fallback_threshold: float,
 ) -> Predecessor | None:
     """The most recently-departed establishment at the same address, if
@@ -148,7 +149,7 @@ def find_predecessor(
     for est in postcode_index.get(postcode.strip().upper(), []):
         if est["fhrsid"] == fhrsid or est["last_seen_date"] >= first_seen_date:
             continue
-        score = name_similarity(normalized_target, normalize_company_name(est.get("business_name")))
+        score = name_similarity(normalized_target, normalize_company_name(est.get("business_name")), idf)
         if score >= fallback_threshold:
             scored.append((score, est))
 

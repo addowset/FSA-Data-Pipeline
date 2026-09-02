@@ -38,6 +38,7 @@ from fsa_pipeline.matcher import (
     build_address_density,
     build_companies_by_district,
     build_companies_by_first_word,
+    build_word_idf,
     find_candidates,
     find_national_candidates,
     merge_candidates,
@@ -66,6 +67,7 @@ def run(force: bool) -> int:
     companies_by_district = build_companies_by_district(companies)
     companies_by_first_word = build_companies_by_first_word(companies)
     address_density = build_address_density(companies)
+    idf = build_word_idf(companies)
 
     insert_events = conn.execute(
         "SELECT fhrsid, authority_code, collection_date FROM diff_events WHERE event_type = 'INSERT'"
@@ -96,11 +98,11 @@ def run(force: bool) -> int:
         business_name, post_code = establishment
         district_candidates = find_candidates(
             business_name, post_code, companies_by_district, address_density,
-            config.high_density_address_threshold, config.candidates_per_match,
+            config.high_density_address_threshold, idf, config.candidates_per_match,
         )
         national_candidates = find_national_candidates(
             business_name, companies_by_first_word, address_density,
-            config.high_density_address_threshold, config.national_match_threshold, config.candidates_per_match,
+            config.high_density_address_threshold, config.national_match_threshold, idf, config.candidates_per_match,
         )
         candidates = merge_candidates(district_candidates, national_candidates, config.candidates_per_match)
 

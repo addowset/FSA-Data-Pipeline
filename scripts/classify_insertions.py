@@ -42,7 +42,7 @@ from fsa_pipeline.classifier import (
 )
 from fsa_pipeline.config import load_config
 from fsa_pipeline.logging_utils import setup_logger
-from fsa_pipeline.matcher import Candidate
+from fsa_pipeline.matcher import Candidate, build_word_idf
 
 
 def now_iso() -> str:
@@ -107,6 +107,17 @@ def run(force: bool) -> int:
     postcode_index = build_postcode_index(establishments)
     logger.info("%d establishments loaded, %d distinct exact addresses", len(establishments), len(address_index))
 
+    # Same word-rarity model the matcher uses (fsa_pipeline/matcher.py's
+    # build_word_idf, see its docstring) -- reused here so the
+    # address-history fallback's FHRS-name-vs-FHRS-name comparison scores
+    # a shared distinctive word the same way a shared generic descriptor
+    # ("FISH BAR", "TAKEAWAY") is discounted in the company matcher.
+    companies = [
+        {"company_name": row[0]}
+        for row in conn.execute("SELECT company_name FROM companies_current").fetchall()
+    ]
+    idf = build_word_idf(companies)
+
     best_candidates = load_best_candidates(conn)
     matched_venues = load_matched_venues(conn, config.new_venue_medium_threshold)
     operator_index = build_company_operator_index(matched_venues)
@@ -140,7 +151,7 @@ def run(force: bool) -> int:
 
         predecessor = find_predecessor(
             fhrsid, establishment["business_name"], establishment["address_line_1"], establishment["postcode"],
-            first_seen_date, address_index, postcode_index, config.address_history_fallback_threshold,
+            first_seen_date, address_index, postcode_index, idf, config.address_history_fallback_threshold,
         )
         best_candidate = best_candidates.get((fhrsid, collection_date))
         candidates_found = match_counts.get(f"{fhrsid}|{collection_date}", 0)

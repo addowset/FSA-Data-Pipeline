@@ -12,7 +12,17 @@ from fsa_pipeline.classifier import (
     find_predecessor,
 )
 from fsa_pipeline.config import Config
-from fsa_pipeline.matcher import Candidate
+from fsa_pipeline.matcher import EMPTY_IDF, Candidate
+
+# find_predecessor's fallback path scores two FHRS business names against
+# each other via matcher.name_similarity (see fsa_pipeline/matcher.py's
+# WordIdf/build_word_idf). EMPTY_IDF is a valid stand-in for every test
+# below: identical normalized names always score 1.0 regardless of idf
+# coverage, and every "should NOT match" fixture here uses names sharing
+# zero words, which scores 0.0 with any idf table. See test_matcher.py's
+# test_build_word_idf_weights_rare_words_above_common_ones for a test that
+# actually exercises real partial-overlap weighting.
+_NO_IDF = EMPTY_IDF
 
 
 def make_config(**overrides) -> Config:
@@ -70,7 +80,7 @@ def test_address_key_none_when_missing():
 def test_find_predecessor_none_when_no_history():
     index = build_address_index([make_establishment(1, "New Cafe")])
     pc_index = build_postcode_index([make_establishment(1, "New Cafe")])
-    result = find_predecessor(1, "New Cafe", "1 High Street", "NG17 3GA", "2026-08-20", index, pc_index, 0.9)
+    result = find_predecessor(1, "New Cafe", "1 High Street", "NG17 3GA", "2026-08-20", index, pc_index, _NO_IDF, 0.9)
     assert result is None
 
 
@@ -82,7 +92,7 @@ def test_find_predecessor_excludes_still_active_overlap():
     index = build_address_index([old, new])
     pc_index = build_postcode_index([old, new])
 
-    result = find_predecessor(2, new["business_name"], new["address_line_1"], new["postcode"], new["first_seen_date"], index, pc_index, 0.9)
+    result = find_predecessor(2, new["business_name"], new["address_line_1"], new["postcode"], new["first_seen_date"], index, pc_index, _NO_IDF, 0.9)
     assert result is None  # old was still active (last_seen 08-26 >= new's first_seen 08-20)
 
 
@@ -92,7 +102,7 @@ def test_find_predecessor_finds_genuinely_departed_business():
     index = build_address_index([old, new])
     pc_index = build_postcode_index([old, new])
 
-    result = find_predecessor(2, new["business_name"], new["address_line_1"], new["postcode"], new["first_seen_date"], index, pc_index, 0.9)
+    result = find_predecessor(2, new["business_name"], new["address_line_1"], new["postcode"], new["first_seen_date"], index, pc_index, _NO_IDF, 0.9)
     assert result is not None
     assert result.fhrsid == 1
     assert result.business_name == "The Castle Inn"
@@ -106,7 +116,7 @@ def test_find_predecessor_picks_most_recently_departed():
     index = build_address_index([old1, old2, new])
     pc_index = build_postcode_index([old1, old2, new])
 
-    result = find_predecessor(3, new["business_name"], new["address_line_1"], new["postcode"], new["first_seen_date"], index, pc_index, 0.9)
+    result = find_predecessor(3, new["business_name"], new["address_line_1"], new["postcode"], new["first_seen_date"], index, pc_index, _NO_IDF, 0.9)
     assert result.fhrsid == 2  # most recent departure, not the oldest
 
 
@@ -116,13 +126,13 @@ def test_find_predecessor_ignores_different_address():
     index = build_address_index([old, new])
     pc_index = build_postcode_index([old, new])
 
-    result = find_predecessor(2, new["business_name"], new["address_line_1"], new["postcode"], new["first_seen_date"], index, pc_index, 0.9)
+    result = find_predecessor(2, new["business_name"], new["address_line_1"], new["postcode"], new["first_seen_date"], index, pc_index, _NO_IDF, 0.9)
     assert result is None
 
 
 def test_find_predecessor_none_when_postcode_missing():
     index = build_address_index([make_establishment(1, "Old", last_seen="2020-01-01")])
-    result = find_predecessor(2, "New", "1 High Street", None, "2026-08-20", index, {}, 0.9)
+    result = find_predecessor(2, "New", "1 High Street", None, "2026-08-20", index, {}, _NO_IDF, 0.9)
     assert result is None
 
 
@@ -139,7 +149,7 @@ def test_find_predecessor_fallback_when_address_line_1_missing():
     index = build_address_index([old, new])  # both excluded, address_line_1 is None
     pc_index = build_postcode_index([old, new])
 
-    result = find_predecessor(2, new["business_name"], new["address_line_1"], new["postcode"], new["first_seen_date"], index, pc_index, 0.9)
+    result = find_predecessor(2, new["business_name"], new["address_line_1"], new["postcode"], new["first_seen_date"], index, pc_index, _NO_IDF, 0.9)
 
     assert result is not None
     assert result.fhrsid == 1
@@ -153,7 +163,7 @@ def test_find_predecessor_fallback_requires_near_exact_name():
     index = build_address_index([old, new])
     pc_index = build_postcode_index([old, new])
 
-    result = find_predecessor(2, new["business_name"], new["address_line_1"], new["postcode"], new["first_seen_date"], index, pc_index, 0.9)
+    result = find_predecessor(2, new["business_name"], new["address_line_1"], new["postcode"], new["first_seen_date"], index, pc_index, _NO_IDF, 0.9)
     assert result is None
 
 
@@ -165,7 +175,7 @@ def test_find_predecessor_fallback_only_used_when_exact_match_finds_nothing():
     index = build_address_index([old, new])
     pc_index = build_postcode_index([old, new])
 
-    result = find_predecessor(2, new["business_name"], new["address_line_1"], new["postcode"], new["first_seen_date"], index, pc_index, 0.9)
+    result = find_predecessor(2, new["business_name"], new["address_line_1"], new["postcode"], new["first_seen_date"], index, pc_index, _NO_IDF, 0.9)
     assert result is not None
     assert result.fhrsid == 1
 
@@ -460,7 +470,7 @@ def test_predecessor_lookup_works_against_establishment_with_zero_field_changed_
     index = build_address_index(establishments)
     pc_index = build_postcode_index(establishments)
 
-    result = find_predecessor(2, "The New Castle", "1 High Street", "NG17 3GA", "2026-08-23", index, pc_index, 0.9)
+    result = find_predecessor(2, "The New Castle", "1 High Street", "NG17 3GA", "2026-08-23", index, pc_index, _NO_IDF, 0.9)
 
     assert result is not None
     assert result.fhrsid == 1
