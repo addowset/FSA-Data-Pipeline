@@ -62,16 +62,18 @@ def load_best_candidates(conn) -> dict[tuple[int, str], Candidate]:
     rows = conn.execute(
         """
         SELECT fhrsid, insert_collection_date, company_number, company_name, name_similarity_score,
-               postcode_district, address_company_count, is_high_density_address, match_strategy, date_of_creation
+               postcode_district, address_company_count, is_high_density_address, match_strategy, date_of_creation,
+               address_matches_establishment
         FROM company_match_candidates WHERE rank = 1
         """
     ).fetchall()
     result = {}
-    for fhrsid, insert_date, number, name, score, district, count, high_density, strategy, created in rows:
+    for fhrsid, insert_date, number, name, score, district, count, high_density, strategy, created, address_match in rows:
         result[(fhrsid, insert_date)] = Candidate(
             company_number=number, company_name=name, name_similarity_score=score,
             postcode_district=district, address_company_count=count,
             is_high_density_address=bool(high_density), match_strategy=strategy, date_of_creation=created,
+            address_matches_establishment=bool(address_match),
         )
     return result
 

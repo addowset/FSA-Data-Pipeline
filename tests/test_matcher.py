@@ -126,7 +126,8 @@ def test_find_candidates_ranks_by_similarity_and_flags_high_density():
 
     candidates = find_candidates(
         "The Cob Kings", "NG17 3GA", by_district, density,
-        high_density_threshold=5, idf=idf, top_n=5,
+        high_density_threshold=5, idf=idf,
+        establishment_address_line_1=None, establishment_first_seen_date="2026-01-01", top_n=5,
     )
 
     assert len(candidates) == 2  # only the two in NG17
@@ -143,7 +144,8 @@ def test_find_candidates_flags_high_density_address():
 
     candidates = find_candidates(
         "Company 0", "WC2H 9JQ", by_district, density,
-        high_density_threshold=5, idf=idf, top_n=5,
+        high_density_threshold=5, idf=idf,
+        establishment_address_line_1=None, establishment_first_seen_date="2026-01-01", top_n=5,
     )
 
     assert candidates[0].is_high_density_address is True
@@ -151,12 +153,18 @@ def test_find_candidates_flags_high_density_address():
 
 
 def test_find_candidates_returns_empty_for_unmatched_district():
-    candidates = find_candidates("Anything", "ZZ99 9ZZ", {}, {}, high_density_threshold=5, idf=EMPTY_IDF, top_n=5)
+    candidates = find_candidates(
+        "Anything", "ZZ99 9ZZ", {}, {}, high_density_threshold=5, idf=EMPTY_IDF,
+        establishment_address_line_1=None, establishment_first_seen_date="2026-01-01", top_n=5,
+    )
     assert candidates == []
 
 
 def test_find_candidates_returns_empty_for_missing_postcode():
-    candidates = find_candidates("Anything", None, {"NG17": []}, {}, high_density_threshold=5, idf=EMPTY_IDF, top_n=5)
+    candidates = find_candidates(
+        "Anything", None, {"NG17": []}, {}, high_density_threshold=5, idf=EMPTY_IDF,
+        establishment_address_line_1=None, establishment_first_seen_date="2026-01-01", top_n=5,
+    )
     assert candidates == []
 
 
@@ -166,8 +174,79 @@ def test_find_candidates_respects_top_n():
     density = build_address_density(companies)
     idf = build_word_idf(companies)
 
-    candidates = find_candidates("Restaurant", "NG17 3GA", by_district, density, high_density_threshold=5, idf=idf, top_n=3)
+    candidates = find_candidates(
+        "Restaurant", "NG17 3GA", by_district, density, high_density_threshold=5, idf=idf,
+        establishment_address_line_1=None, establishment_first_seen_date="2026-01-01", top_n=3,
+    )
     assert len(candidates) == 3
+
+
+def test_find_candidates_prioritizes_exact_address_match_over_higher_name_score():
+    """The real case: FHRSID 1981162 "Favourite Grill" -- the top-ranked-
+    by-name candidate ("Favourite Grill Ltd") turned out to be a
+    coincidental namesake in a different town entirely (caught via the
+    national channel, not this test), while a low-name-score candidate
+    ("Best Grill Bristol Ltd") shares the establishment's exact
+    registered address. Within find_candidates alone: a low-scoring
+    exact-address match must still outrank a higher-scoring one at a
+    different address."""
+    companies = [
+        make_company("1", "Cheap Grill Limited", "16 Gloucester Road North", "BS7 0SF"),
+        make_company("2", "Something Grill Related Ltd", "9 Elsewhere Road", "BS7 1AA"),
+    ]
+    by_district = build_companies_by_district(companies)
+    density = build_address_density(companies)
+    idf = build_word_idf(companies)
+
+    candidates = find_candidates(
+        "Favourite Grill", "BS7 0SF", by_district, density, high_density_threshold=5, idf=idf,
+        establishment_address_line_1="16 Gloucester Road North", establishment_first_seen_date="2026-08-25", top_n=5,
+    )
+
+    assert candidates[0].company_number == "1"  # address match wins despite a weaker name score
+    assert candidates[0].address_matches_establishment is True
+    assert candidates[1].address_matches_establishment is False
+
+
+def test_find_candidates_prefers_closer_incorporation_among_address_matches():
+    """The user's own reasoning: when two companies share the exact
+    establishment address, the one incorporated closer to the
+    establishment's first-seen date is the more plausible trigger for
+    this FHRS record (the other is more likely the previous occupant)."""
+    companies = [
+        make_company("old", "Best Grill Bristol Ltd", "16 Gloucester Road North", "BS7 0SF"),
+        make_company("new", "Cheap Grill Limited", "16 Gloucester Road North", "BS7 0SF"),
+    ]
+    companies[0]["date_of_creation"] = "2025-04-12"  # over a year before first_seen
+    companies[1]["date_of_creation"] = "2026-06-17"  # ~2 months before first_seen
+    by_district = build_companies_by_district(companies)
+    density = build_address_density(companies)
+    idf = build_word_idf(companies)
+
+    candidates = find_candidates(
+        "Favourite Grill", "BS7 0SF", by_district, density, high_density_threshold=5, idf=idf,
+        establishment_address_line_1="16 Gloucester Road North", establishment_first_seen_date="2026-08-25", top_n=5,
+    )
+
+    assert candidates[0].company_number == "new"
+
+
+def test_find_candidates_does_not_boost_high_density_address_match():
+    """A formation-agent address matching exactly is still not trusted --
+    the brief's original warning still holds there."""
+    companies = [make_company(str(i), f"Company {i} Ltd", "16 Gloucester Road North", "BS7 0SF") for i in range(6)]
+    by_district = build_companies_by_district(companies)
+    density = build_address_density(companies)
+    idf = build_word_idf(companies)
+
+    candidates = find_candidates(
+        "Totally Unrelated Name", "BS7 0SF", by_district, density, high_density_threshold=5, idf=idf,
+        establishment_address_line_1="16 Gloucester Road North", establishment_first_seen_date="2026-08-25", top_n=5,
+    )
+
+    # All share the address, all high-density -- ranking falls back to
+    # name similarity (all ~0.0 here), not the address match.
+    assert all(c.is_high_density_address for c in candidates)
 
 
 # --- national name-match channel (Soul Mama / Mamma Rosa case) ---
@@ -244,7 +323,7 @@ def test_merge_candidates_deduplicates_by_company_number_keeping_higher_score():
                            postcode_district="", address_company_count=1, is_high_density_address=False,
                            match_strategy="national")]
 
-    merged = merge_candidates(district, national, top_n=5)
+    merged = merge_candidates(district, national, top_n=5, establishment_first_seen_date="2026-01-01")
     assert len(merged) == 1
     assert merged[0].match_strategy == "national"
     assert merged[0].name_similarity_score == 0.95
@@ -259,7 +338,7 @@ def test_merge_candidates_combines_distinct_companies_and_sorts():
                            postcode_district="", address_company_count=1, is_high_density_address=False,
                            match_strategy="national")]
 
-    merged = merge_candidates(district, national, top_n=5)
+    merged = merge_candidates(district, national, top_n=5, establishment_first_seen_date="2026-01-01")
     assert [c.company_number for c in merged] == ["2", "1"]  # highest score first
 
 
@@ -270,5 +349,26 @@ def test_merge_candidates_respects_top_n():
                            postcode_district="NG17", address_company_count=1, is_high_density_address=False)
                 for i in range(10)]
 
-    merged = merge_candidates(district, [], top_n=3)
+    merged = merge_candidates(district, [], top_n=3, establishment_first_seen_date="2026-01-01")
     assert len(merged) == 3
+
+
+def test_merge_candidates_address_match_outranks_higher_scoring_national_coincidence():
+    """The real Favourite Grill case end-to-end: the national channel's
+    exact-name match ("Favourite Grill Ltd") is a coincidental namesake
+    in a different town (score 1.0, but no address match); the district
+    channel's low-name-score candidate ("Best Grill Bristol Ltd") shares
+    the establishment's exact address. The address match must win."""
+    from fsa_pipeline.matcher import Candidate
+
+    district = [Candidate(company_number="best-grill", company_name="Best Grill Bristol Ltd",
+                           name_similarity_score=0.17, postcode_district="BS7", address_company_count=2,
+                           is_high_density_address=False, match_strategy="district",
+                           address_matches_establishment=True, date_of_creation="2025-04-12")]
+    national = [Candidate(company_number="favourite-grill", company_name="Favourite Grill Ltd",
+                           name_similarity_score=1.0, postcode_district="SS8", address_company_count=1,
+                           is_high_density_address=False, match_strategy="national",
+                           address_matches_establishment=False, date_of_creation="2025-02-05")]
+
+    merged = merge_candidates(district, national, top_n=5, establishment_first_seen_date="2026-08-25")
+    assert merged[0].company_number == "best-grill"

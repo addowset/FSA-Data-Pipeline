@@ -55,11 +55,12 @@ def make_establishment(fhrsid, name, address_line_1="1 High Street", postcode="N
 
 
 def make_candidate(score, high_density=False, count=1, name="Some Company Ltd", number="12345678",
-                    date_of_creation="2026-07-01", strategy="district"):
+                    date_of_creation="2026-07-01", strategy="district", address_matches_establishment=False):
     return Candidate(
         company_number=number, company_name=name, name_similarity_score=score,
         postcode_district="NG17", address_company_count=count, is_high_density_address=high_density,
         match_strategy=strategy, date_of_creation=date_of_creation,
+        address_matches_establishment=address_matches_establishment,
     )
 
 
@@ -416,6 +417,87 @@ def test_classify_new_venue_notes_existing_operator():
     assert "Soul Mama Islington" in result.reason
     assert "additional site" in result.reason
     assert result.evidence_existing_operator_fhrsid == 1
+
+
+# --- exact-address corroboration (the "Best Grill Bristol" case) ---
+
+def test_classify_new_venue_via_address_match_despite_low_name_score():
+    """The real case: "Best Grill Bristol Ltd" scores low on name
+    similarity against "Favourite Grill" but shares the establishment's
+    exact registered address -- that alone should be enough to qualify
+    for NEW_VENUE consideration, below the name-similarity threshold."""
+    candidate = make_candidate(score=0.17, date_of_creation="2026-06-17", address_matches_establishment=True)
+
+    result = classify(
+        first_seen_date="2026-08-25", postcode="BS7 0SF", candidates_found=3, best_candidate=candidate,
+        predecessor=None, existing_operator=None, config=make_config(),
+    )
+
+    assert result.classification == "NEW_VENUE"
+    assert "exact match for this establishment's address" in result.reason
+
+
+def test_classify_address_match_still_subject_to_incorporation_gate():
+    """An exact address match doesn't bypass the recency gate -- an old
+    company at the right address is more likely just the long-standing
+    occupant (or the previous one, caught separately via predecessor
+    detection), not evidence of anything new."""
+    candidate = make_candidate(score=0.17, date_of_creation="2020-01-01", address_matches_establishment=True)
+
+    result = classify(
+        first_seen_date="2026-08-25", postcode="BS7 0SF", candidates_found=3, best_candidate=candidate,
+        predecessor=None, existing_operator=None, config=make_config(),
+    )
+
+    assert result.classification == "UNKNOWN"
+    assert "qualified via exact registered-address match" in result.reason
+
+
+def test_classify_high_density_address_match_does_not_qualify():
+    """A formation-agent address matching exactly still isn't trusted --
+    the brief's original warning holds regardless of exact-address
+    equality once the address is shared by many companies."""
+    candidate = make_candidate(score=0.17, high_density=True, count=8, date_of_creation="2026-06-17",
+                                address_matches_establishment=True)
+
+    result = classify(
+        first_seen_date="2026-08-25", postcode="BS7 0SF", candidates_found=3, best_candidate=candidate,
+        predecessor=None, existing_operator=None, config=make_config(),
+    )
+
+    assert result.classification == "UNKNOWN"
+
+
+def test_classify_ownership_change_corroborated_via_address_match():
+    """Same principle inside the OWNERSHIP_CHANGE branch: a low-scoring
+    but address-matched candidate should still be cited as corroboration,
+    not silently dropped for falling under the name-similarity bar."""
+    predecessor = Predecessor(fhrsid=1, business_name="Hyderabadi Paradise", first_seen_date="2020-01-01", last_seen_date="2026-08-24")
+    candidate = make_candidate(score=0.17, date_of_creation="2026-06-17", address_matches_establishment=True)
+
+    result = classify(
+        first_seen_date="2026-08-25", postcode="BS7 0SF", candidates_found=3, best_candidate=candidate,
+        predecessor=predecessor, existing_operator=None, config=make_config(),
+    )
+
+    assert result.classification == "OWNERSHIP_CHANGE"
+    assert "Corroborated" in result.reason
+    assert "exact match for this establishment's address" in result.reason
+
+
+def test_classify_ownership_change_not_corroborated_by_weak_unmatched_candidate():
+    """Without an address match, a low name score stays uncorroborated --
+    unchanged behaviour, guards against the new check firing too broadly."""
+    predecessor = Predecessor(fhrsid=1, business_name="Old Tenant", first_seen_date="2020-01-01", last_seen_date="2026-08-15")
+    candidate = make_candidate(score=0.17, date_of_creation="2026-06-17", address_matches_establishment=False)
+
+    result = classify(
+        first_seen_date="2026-08-25", postcode="BS7 0SF", candidates_found=3, best_candidate=candidate,
+        predecessor=predecessor, existing_operator=None, config=make_config(),
+    )
+
+    assert result.classification == "OWNERSHIP_CHANGE"
+    assert "Corroborated" not in result.reason
 
 
 # --- integration proof of the "Stage 5 design commitment" ---

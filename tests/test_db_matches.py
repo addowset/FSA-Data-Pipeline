@@ -47,6 +47,21 @@ def test_record_match_with_no_candidates(tmp_path):
     assert run_row == (0, None)
 
 
+def test_record_match_persists_address_matches_establishment(tmp_path):
+    conn = db.connect(tmp_path / "t.db")
+    candidates = [
+        Candidate(company_number="1", company_name="Best Grill Bristol Ltd", name_similarity_score=0.17,
+                   postcode_district="BS7", address_company_count=2, is_high_density_address=False,
+                   address_matches_establishment=True),
+    ]
+    db.record_match(conn, 1, "857", "2026-08-25", candidates, "2026-08-25T00:00:00Z")
+
+    row = conn.execute(
+        "SELECT address_matches_establishment FROM company_match_candidates WHERE fhrsid = 1"
+    ).fetchone()
+    assert row == (1,)
+
+
 def test_record_match_rerun_replaces_candidates(tmp_path):
     conn = db.connect(tmp_path / "t.db")
     db.record_match(conn, 1, "857", "2026-08-21", [make_candidate("1", 0.5)], "2026-08-21T00:00:00Z")

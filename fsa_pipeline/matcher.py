@@ -47,6 +47,27 @@ document frequency), so a shared rare proper noun dominates a shared
 generic descriptor instead of losing to it on raw character count. See
 README "Design notes" for the worked-example numbers.
 
+Exact-address corroboration added 2026-09-02: the brief's "never match on
+address equality" warning is about never using address as the *sole*
+signal (a formation agent hosts dozens of unrelated companies at one
+address -- see above), not a ban on using it at all. Real case: FHRSID
+1981162 "Favourite Grill" -- the district channel's top-ranked-by-name
+candidate was a company genuinely named "Favourite Grill Ltd", but
+registered in Canvey Island, Essex, nowhere near the Bristol venue (a
+coincidental namesake, found via the national channel). Meanwhile "Best
+Grill Bristol Ltd" and "Cheap Grill Limited", both scoring low on name
+similarity, share the establishment's *exact* registered address --
+direct evidence one of them occupies this specific venue, independent of
+(and here, stronger than) any name match. `address_matches_establishment`
+flags this, gated on the address NOT being high-density (so a genuine
+formation-agent address never gets this boost -- the original warning
+still holds there). Among multiple exact-address candidates, the one
+incorporated closest to the establishment's first-seen date is preferred
+-- the user's own reasoning: a company incorporated 2 months before a new
+FHRS record is a far more plausible trigger than one incorporated a year
+prior (which is more likely the *previous* occupant, already captured by
+the classifier's separate FHRS-address-history predecessor check).
+
 This module only finds and scores candidates -- it does not decide
 NEW_VENUE / OWNERSHIP_CHANGE / UNKNOWN. That classification is stage 5,
 which will consume this module's output (fsa_pipeline/db.py's
@@ -55,6 +76,7 @@ company_match_candidates table).
 
 from __future__ import annotations
 
+import datetime as dt
 import math
 import re
 from dataclasses import dataclass
@@ -184,6 +206,7 @@ class Candidate:
     is_high_density_address: bool
     match_strategy: str = "district"  # 'district' | 'national'
     date_of_creation: str | None = None
+    address_matches_establishment: bool = False
 
 
 def build_address_density(companies: list[dict]) -> dict[str, int]:
@@ -196,8 +219,40 @@ def build_address_density(companies: list[dict]) -> dict[str, int]:
     return counts
 
 
+def _address_key_raw(address_line_1: str | None, postal_code: str | None) -> str:
+    return f"{(address_line_1 or '').strip().upper()}|{(postal_code or '').strip().upper()}"
+
+
 def _address_key(company: dict) -> str:
-    return f"{(company.get('address_line_1') or '').strip().upper()}|{(company.get('postal_code') or '').strip().upper()}"
+    return _address_key_raw(company.get("address_line_1"), company.get("postal_code"))
+
+
+def _incorporation_closeness(date_of_creation: str | None, establishment_first_seen_date: str) -> float:
+    """Higher is better (closer to 0 days apart). -inf for an unparseable
+    or missing date, so a candidate with a known date always outranks one
+    without, among otherwise-equal address-matched candidates."""
+    if not date_of_creation:
+        return float("-inf")
+    try:
+        created = dt.date.fromisoformat(date_of_creation)
+        first_seen = dt.date.fromisoformat(establishment_first_seen_date)
+    except ValueError:
+        return float("-inf")
+    return -abs((first_seen - created).days)
+
+
+def _candidate_priority(candidate: Candidate, establishment_first_seen_date: str) -> tuple:
+    """Sort/dedup key: an exact registered-address match at a
+    non-high-density address outranks name similarity alone -- see module
+    docstring, "Best Grill Bristol" case. Among multiple qualifying
+    candidates, the one incorporated closest to the establishment's
+    first-seen date wins; name similarity is the final tiebreak. A
+    candidate that doesn't qualify is ranked purely by name similarity,
+    unchanged from before this was added (the closeness term is pinned to
+    0.0 so it can never influence non-qualifying candidates' order)."""
+    qualifies = candidate.address_matches_establishment and not candidate.is_high_density_address
+    closeness = _incorporation_closeness(candidate.date_of_creation, establishment_first_seen_date) if qualifies else 0.0
+    return (qualifies, closeness, candidate.name_similarity_score)
 
 
 def build_companies_by_district(companies: list[dict]) -> dict[str, list[dict]]:
@@ -224,7 +279,10 @@ def build_companies_by_first_word(companies: list[dict]) -> dict[str, list[dict]
     return by_first_word
 
 
-def _make_candidate(company: dict, score: float, district: str | None, address_density: dict, high_density_threshold: int, strategy: str) -> Candidate:
+def _make_candidate(
+    company: dict, score: float, district: str | None, address_density: dict, high_density_threshold: int,
+    strategy: str, address_matches_establishment: bool = False,
+) -> Candidate:
     density = address_density.get(_address_key(company), 1)
     return Candidate(
         company_number=company["company_number"],
@@ -235,6 +293,7 @@ def _make_candidate(company: dict, score: float, district: str | None, address_d
         is_high_density_address=density >= high_density_threshold,
         match_strategy=strategy,
         date_of_creation=company.get("date_of_creation"),
+        address_matches_establishment=address_matches_establishment,
     )
 
 
@@ -245,6 +304,8 @@ def find_candidates(
     address_density: dict[str, int],
     high_density_threshold: int,
     idf: dict[str, float],
+    establishment_address_line_1: str | None,
+    establishment_first_seen_date: str,
     top_n: int = 5,
 ) -> list[Candidate]:
     district = normalize_postcode_district(postcode)
@@ -257,15 +318,23 @@ def find_candidates(
 
     normalized_target = normalize_company_name(business_name)
 
+    # Only a meaningful check when both sides actually have an address --
+    # otherwise two blank keys would trivially "match" everything.
+    establishment_key = (
+        _address_key_raw(establishment_address_line_1, postcode)
+        if establishment_address_line_1 and postcode else None
+    )
+
     scored = [
         _make_candidate(
             company, name_similarity(normalized_target, normalize_company_name(company.get("company_name")), idf),
             district, address_density, high_density_threshold, "district",
+            address_matches_establishment=(establishment_key is not None and _address_key(company) == establishment_key),
         )
         for company in same_district
     ]
 
-    scored.sort(key=lambda c: c.name_similarity_score, reverse=True)
+    scored.sort(key=lambda c: _candidate_priority(c, establishment_first_seen_date), reverse=True)
     return scored[:top_n]
 
 
@@ -300,16 +369,27 @@ def find_national_candidates(
     return scored[:top_n]
 
 
-def merge_candidates(district_candidates: list[Candidate], national_candidates: list[Candidate], top_n: int) -> list[Candidate]:
+def merge_candidates(
+    district_candidates: list[Candidate], national_candidates: list[Candidate], top_n: int,
+    establishment_first_seen_date: str,
+) -> list[Candidate]:
     """Combines both channels' results, deduplicating by company_number
-    (keeping the higher-scoring entry if a company appears in both --
+    (keeping the higher-priority entry if a company appears in both --
     district search already gives a district-corroborated result, which
-    is preferable evidence to the same company found nationally)."""
+    is preferable evidence to the same company found nationally) and
+    ranking the combined list by the same address-match-aware priority
+    find_candidates uses (see _candidate_priority) -- otherwise a
+    national exact-name coincidence (e.g. "Favourite Grill Ltd" in
+    Canvey Island) could still outrank a genuine address-matched district
+    candidate purely on a higher raw name score."""
     by_number: dict[str, Candidate] = {}
     for candidate in district_candidates + national_candidates:
         existing = by_number.get(candidate.company_number)
-        if existing is None or candidate.name_similarity_score > existing.name_similarity_score:
+        if existing is None or (
+            _candidate_priority(candidate, establishment_first_seen_date)
+            > _candidate_priority(existing, establishment_first_seen_date)
+        ):
             by_number[candidate.company_number] = candidate
 
-    merged = sorted(by_number.values(), key=lambda c: c.name_similarity_score, reverse=True)
+    merged = sorted(by_number.values(), key=lambda c: _candidate_priority(c, establishment_first_seen_date), reverse=True)
     return merged[:top_n]

@@ -247,7 +247,8 @@ CREATE TABLE IF NOT EXISTS company_match_candidates (
     address_company_count INTEGER NOT NULL,
     is_high_density_address INTEGER NOT NULL,
     match_strategy TEXT NOT NULL DEFAULT 'district',
-    date_of_creation TEXT
+    date_of_creation TEXT,
+    address_matches_establishment INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_company_match_candidates_fhrsid
     ON company_match_candidates(fhrsid, insert_collection_date);
@@ -313,10 +314,13 @@ _ESTABLISHMENTS_CURRENT_MIGRATIONS = {
 
 # Same situation, added 2026-08-28 for the national name-match channel
 # (fsa_pipeline/matcher.py) and the NEW_VENUE incorporation-recency gate
-# (fsa_pipeline/classifier.py).
+# (fsa_pipeline/classifier.py). address_matches_establishment added
+# 2026-09-02 for the exact-address corroboration signal (see matcher.py
+# module docstring, "Best Grill Bristol" case).
 _COMPANY_MATCH_CANDIDATES_MIGRATIONS = {
     "match_strategy": "TEXT NOT NULL DEFAULT 'district'",
     "date_of_creation": "TEXT",
+    "address_matches_establishment": "INTEGER NOT NULL DEFAULT 0",
 }
 
 # Same situation, added 2026-08-28 for the existing-operator flag.
@@ -692,13 +696,14 @@ def record_match(
             INSERT INTO company_match_candidates
                 (fhrsid, insert_collection_date, rank, company_number, company_name,
                  name_similarity_score, postcode_district, address_company_count, is_high_density_address,
-                 match_strategy, date_of_creation)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 match_strategy, date_of_creation, address_matches_establishment)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (fhrsid, insert_collection_date, rank, c.company_number, c.company_name,
                  c.name_similarity_score, c.postcode_district, c.address_company_count,
-                 int(c.is_high_density_address), c.match_strategy, c.date_of_creation)
+                 int(c.is_high_density_address), c.match_strategy, c.date_of_creation,
+                 int(c.address_matches_establishment))
                 for rank, c in enumerate(candidates, start=1)
             ],
         )

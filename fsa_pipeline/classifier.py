@@ -211,6 +211,20 @@ def _is_recently_incorporated(date_of_creation: str | None, first_seen_date: str
     return 0 <= age_days <= max_age_days
 
 
+def _is_corroborating(candidate: Candidate, config: Config) -> bool:
+    """A candidate counts as corroborating evidence either via name
+    similarity clearing the medium threshold, or via an exact
+    registered-address match at a non-high-density address -- direct
+    evidence this specific company occupies this specific venue,
+    independent of (and sometimes stronger than) a fuzzy name score. See
+    matcher.py module docstring, the "Best Grill Bristol" case: a company
+    can share an establishment's exact address while scoring low on name
+    similarity, and still be the right match."""
+    if candidate.name_similarity_score >= config.new_venue_medium_threshold:
+        return True
+    return candidate.address_matches_establishment and not candidate.is_high_density_address
+
+
 def classify(
     *,
     first_seen_date: str,
@@ -227,10 +241,12 @@ def classify(
             f"\"{predecessor.business_name}\" (FHRSID {predecessor.fhrsid}), active "
             f"{predecessor.first_seen_date} to {predecessor.last_seen_date}, before this record appeared."
         )
-        if best_candidate is not None and best_candidate.name_similarity_score >= config.new_venue_medium_threshold:
+        if best_candidate is not None and _is_corroborating(best_candidate, config):
             reason += (
                 f" Corroborated by a Companies House match: \"{best_candidate.company_name}\" "
                 f"(similarity {best_candidate.name_similarity_score})."
+                + (" Registered address is an exact match for this establishment's address."
+                   if best_candidate.address_matches_establishment else "")
             )
         return Classification(
             classification="OWNERSHIP_CHANGE",
@@ -240,15 +256,16 @@ def classify(
             evidence_predecessor_fhrsid=predecessor.fhrsid,
         )
 
-    if best_candidate is not None and best_candidate.name_similarity_score >= config.new_venue_medium_threshold:
+    if best_candidate is not None and _is_corroborating(best_candidate, config):
         score = best_candidate.name_similarity_score
 
         if not _is_recently_incorporated(best_candidate.date_of_creation, first_seen_date, config.new_venue_max_incorporation_age_days):
             reason = (
                 f"Matched Companies House company \"{best_candidate.company_name}\" "
-                f"({best_candidate.company_number}) at similarity {score}, but it was incorporated "
-                f"{best_candidate.date_of_creation or 'at an unknown date'} -- not within "
-                f"{config.new_venue_max_incorporation_age_days} days of this record appearing, "
+                f"({best_candidate.company_number}) at similarity {score}"
+                + (" (qualified via exact registered-address match, not name similarity)" if best_candidate.address_matches_establishment else "")
+                + f", but it was incorporated {best_candidate.date_of_creation or 'at an unknown date'} -- "
+                f"not within {config.new_venue_max_incorporation_age_days} days of this record appearing, "
                 f"so not treated as new-venue evidence."
             )
             return Classification(
@@ -271,6 +288,11 @@ def classify(
             reason += (
                 f" Registered address is shared by {best_candidate.address_company_count} companies "
                 f"(possible formation agent) -- address isn't corroborating, name similarity alone is."
+            )
+        elif best_candidate.address_matches_establishment:
+            reason += (
+                " Registered address is an exact match for this establishment's address -- "
+                "independent corroboration alongside the name match."
             )
         if existing_operator is not None:
             reason += (

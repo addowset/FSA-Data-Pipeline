@@ -87,7 +87,7 @@ def run(force: bool) -> int:
         # backfill (fsa_pipeline/fhrs_live.py) when bulk has none. Never
         # the reverse -- bulk is authoritative when present.
         establishment = conn.execute(
-            "SELECT business_name, COALESCE(post_code, postcode_from_live_api) "
+            "SELECT business_name, COALESCE(post_code, postcode_from_live_api), address_line_1, first_seen_date "
             "FROM establishments_current WHERE fhrsid = ?", (fhrsid,)
         ).fetchone()
 
@@ -95,16 +95,16 @@ def run(force: bool) -> int:
             logger.warning("fhrsid %s has an INSERT event but no establishments_current row, skipping", fhrsid)
             continue
 
-        business_name, post_code = establishment
+        business_name, post_code, address_line_1, first_seen_date = establishment
         district_candidates = find_candidates(
             business_name, post_code, companies_by_district, address_density,
-            config.high_density_address_threshold, idf, config.candidates_per_match,
+            config.high_density_address_threshold, idf, address_line_1, first_seen_date, config.candidates_per_match,
         )
         national_candidates = find_national_candidates(
             business_name, companies_by_first_word, address_density,
             config.high_density_address_threshold, config.national_match_threshold, idf, config.candidates_per_match,
         )
-        candidates = merge_candidates(district_candidates, national_candidates, config.candidates_per_match)
+        candidates = merge_candidates(district_candidates, national_candidates, config.candidates_per_match, first_seen_date)
 
         db.record_match(conn, fhrsid, authority_code, collection_date, candidates, now_iso())
 
