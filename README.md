@@ -554,6 +554,41 @@ had just been wiped — the backfill job would then wrongly skip
 authorities on the next run, thinking they were already done. All
 derived tables are now dropped and replayed together.
 
+## Audit tool ("Match Ledger")
+
+A published, private Artifact for browsing every classified INSERT event
+with its full evidence (matched candidates, scores, reason text) and
+cross-referencing against the ground-truth CSV, with live editable
+verification notes (real match found, real company number, free-text
+notes) that persist independently of the CSV. Built 2026-09-08 after
+several rounds of the user manually spot-checking rows via ad hoc SQL
+queries in conversation -- this replaces that with a searchable,
+filterable, self-serve tool.
+
+`scripts/export_audit_data.py` reads `classifications` +
+`establishments_current` + the top 3 `company_match_candidates` per
+event, cross-references a ground-truth CSV by FHRSID, and writes a
+compact JSON export (field names deliberately short -- see the script
+docstring -- since this gets embedded directly in the tool's HTML,
+multiplied by several thousand rows). That JSON is spliced into a
+static HTML/JS page and published as a Claude Artifact; verification
+notes are stored in the artifact's own live database (a `notes`
+collection keyed by FHRSID), not written back to any file in this repo
+-- the CSV stays a point-in-time seed, the artifact is the current
+state.
+
+To refresh after new data lands (rerun collection/parse/diff/match/
+classify first):
+
+```bash
+python scripts/export_audit_data.py --ground-truth ground_truth_sample_v4.csv --output audit_data.json
+```
+
+Then ask Claude to re-splice and republish the artifact -- the export
+script only produces the data file, it doesn't publish. The published
+tool's URL is recorded in the assistant's memory, not in this repo (it's
+a personal, private artifact, not a build output).
+
 ## Running tests
 
 ```bash
