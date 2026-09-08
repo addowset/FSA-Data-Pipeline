@@ -1,0 +1,528 @@
+<!--
+Template for the "Match Ledger" audit tool -- a published Claude Artifact
+(private, not hosted by this repo) for browsing classifications/evidence
+and cross-referencing the ground-truth CSV, with live editable
+verification notes stored in the artifact's own database.
+
+This file is the reusable source: CSS + JS, no data. To rebuild and
+republish the live tool:
+  1. python scripts/export_audit_data.py --output audit_data.json
+  2. Splice that JSON in place of the /*__DATA__*/[]/*__DATA__*/
+     placeholder below (replace the whole `[]` between the markers),
+     and __GENERATED_AT__ with today's date.
+  3. Publish the assembled file as a Claude Artifact with capabilities
+     {"db": {}}, passing the existing artifact's `url` so it updates in
+     place rather than creating a new one. The URL is recorded in the
+     assistant's memory (audit_tool_match_ledger.md), not in this repo.
+
+See README "Audit tool" for the full workflow and design notes.
+-->
+<title>Match Ledger</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ink:#1b2430; --ink-dim:#4b5563; --paper:#eef0ea; --surface:#f8f9f5; --surface-raised:#ffffff;
+  --line:#d6d9d0; --line-strong:#b9bdb2;
+  --accent:#1f6f64; --accent-ink:#0f4a42; --accent-soft:#dcece8;
+  --nv:#1f6f64; --nv-soft:#dcece8;
+  --oc:#8a5a34; --oc-soft:#efe2d3;
+  --un:#6b7280; --un-soft:#e5e6e8;
+  --good:#2f7d4f; --warn:#b8842a; --bad:#b5502f;
+  --focus:#1f6f64;
+  --shadow: 0 1px 2px rgba(27,36,48,0.06), 0 4px 14px rgba(27,36,48,0.05);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ink:#e7e9e4; --ink-dim:#a7ada2; --paper:#141a17; --surface:#1b221e; --surface-raised:#212924;
+    --line:#333e37; --line-strong:#455049;
+    --accent:#3fb3a2; --accent-ink:#9fe4d8; --accent-soft:#1e3a35;
+    --nv:#3fb3a2; --nv-soft:#1e3a35;
+    --oc:#d3a06e; --oc-soft:#3a2e1f;
+    --un:#9aa1a8; --un-soft:#2a2e33;
+    --good:#4fae76; --warn:#d3a552; --bad:#d97a57;
+    --focus:#3fb3a2;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 4px 18px rgba(0,0,0,0.35);
+  }
+}
+:root[data-theme="dark"]{
+  --ink:#e7e9e4; --ink-dim:#a7ada2; --paper:#141a17; --surface:#1b221e; --surface-raised:#212924;
+  --line:#333e37; --line-strong:#455049;
+  --accent:#3fb3a2; --accent-ink:#9fe4d8; --accent-soft:#1e3a35;
+  --nv:#3fb3a2; --nv-soft:#1e3a35;
+  --oc:#d3a06e; --oc-soft:#3a2e1f;
+  --un:#9aa1a8; --un-soft:#2a2e33;
+  --good:#4fae76; --warn:#d3a552; --bad:#d97a57;
+  --focus:#3fb3a2;
+  --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 4px 18px rgba(0,0,0,0.35);
+}
+*{box-sizing:border-box;}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:"Public Sans",system-ui,-apple-system,sans-serif;font-size:14px;line-height:1.45;}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums;}
+h1,h2,h3{font-family:"Fraunces",Georgia,serif;font-weight:600;text-wrap:balance;margin:0;}
+a{color:var(--accent);}
+button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit;}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px;}
+
+#app{max-width:1400px;margin:0 auto;padding:28px 24px 60px;}
+
+.masthead{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:4px;flex-wrap:wrap;}
+.masthead h1{font-size:26px;letter-spacing:-0.01em;}
+.masthead .sub{color:var(--ink-dim);font-size:13px;}
+.masthead .sub .mono{color:var(--ink-dim);}
+
+.stats{display:flex;gap:10px;flex-wrap:wrap;margin:20px 0 18px;}
+.stat{
+  display:flex;flex-direction:column;gap:2px;padding:10px 14px;border-radius:10px;
+  background:var(--surface-raised);border:1px solid var(--line);cursor:pointer;
+  min-width:108px;box-shadow:var(--shadow);
+  transition:border-color .12s ease, transform .08s ease;
+}
+.stat:hover{border-color:var(--line-strong);}
+.stat:active{transform:translateY(1px);}
+.stat.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset, var(--shadow);}
+.stat .n{font-family:"IBM Plex Mono";font-size:20px;font-weight:500;font-variant-numeric:tabular-nums;}
+.stat .l{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-dim);}
+.stat.nv .n{color:var(--nv);} .stat.oc .n{color:var(--oc);} .stat.un .n{color:var(--un);}
+
+.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;padding:12px 14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;}
+.toolbar input[type=search]{
+  flex:1 1 220px;min-width:180px;padding:7px 10px;border:1px solid var(--line-strong);border-radius:7px;
+  background:var(--surface-raised);color:var(--ink);
+}
+.toolbar select{padding:6px 8px;border:1px solid var(--line-strong);border-radius:7px;background:var(--surface-raised);color:var(--ink);}
+.toolbar label.chk{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-dim);white-space:nowrap;}
+.toolbar .count{margin-left:auto;font-size:12px;color:var(--ink-dim);}
+.toolbar .count .mono{color:var(--ink);}
+
+table{width:100%;border-collapse:collapse;background:var(--surface-raised);border:1px solid var(--line);border-radius:10px;overflow:hidden;}
+.tablewrap{overflow-x:auto;border-radius:10px;box-shadow:var(--shadow);}
+thead th{
+  text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-dim);
+  padding:10px 12px;border-bottom:1px solid var(--line);background:var(--surface);cursor:pointer;user-select:none;
+  white-space:nowrap;
+}
+thead th:hover{color:var(--ink);}
+thead th.sorted{color:var(--accent);}
+thead th .arrow{font-size:9px;margin-left:3px;}
+tbody tr.row{border-bottom:1px solid var(--line);cursor:pointer;}
+tbody tr.row:hover{background:var(--surface);}
+tbody tr.row.expanded{background:var(--surface);}
+td{padding:9px 12px;vertical-align:top;}
+td.id{color:var(--ink-dim);}
+td.name{font-weight:500;max-width:220px;}
+td.addr{color:var(--ink-dim);font-size:12.5px;max-width:200px;}
+td.addr .pc{color:var(--ink);}
+
+.pill{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:99px;font-size:11.5px;font-weight:600;letter-spacing:.02em;white-space:nowrap;}
+.pill.nv{background:var(--nv-soft);color:var(--nv);}
+.pill.oc{background:var(--oc-soft);color:var(--oc);}
+.pill.un{background:var(--un-soft);color:var(--un);}
+.pill .dot{width:6px;height:6px;border-radius:50%;background:currentColor;}
+.conf{font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
+.conf.HIGH{opacity:1;font-weight:600;}
+.conf.MEDIUM{opacity:.75;}
+.conf.LOW{opacity:.5;}
+
+.gtbadge{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:5px;background:var(--accent-soft);color:var(--accent-ink);font-size:10px;font-weight:700;margin-right:6px;}
+.notedot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--warn);margin-left:6px;vertical-align:middle;}
+
+.detail{background:var(--paper);border-bottom:1px solid var(--line);}
+.detail-inner{padding:16px 20px 20px;display:grid;grid-template-columns:1.3fr 1fr;gap:24px;}
+@media (max-width: 900px){.detail-inner{grid-template-columns:1fr;}}
+.detail h4{font-family:"Public Sans";font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-dim);font-weight:700;margin-bottom:8px;}
+.reason{font-size:13px;line-height:1.55;background:var(--surface-raised);border:1px solid var(--line);border-radius:8px;padding:12px 14px;}
+.cands{display:flex;flex-direction:column;gap:8px;}
+.cand{display:flex;justify-content:space-between;gap:10px;padding:9px 11px;background:var(--surface-raised);border:1px solid var(--line);border-radius:8px;font-size:12.5px;}
+.cand .cname{font-weight:600;}
+.cand .cmeta{color:var(--ink-dim);font-size:11.5px;margin-top:2px;}
+.cand .cscore{font-family:"IBM Plex Mono";font-weight:500;white-space:nowrap;}
+.flags{display:flex;gap:4px;margin-top:4px;flex-wrap:wrap;}
+.flag{font-size:9.5px;text-transform:uppercase;letter-spacing:.03em;padding:1px 6px;border-radius:99px;background:var(--un-soft);color:var(--ink-dim);}
+
+.auditbox{background:var(--surface-raised);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-top:10px;}
+.auditbox .row{display:flex;gap:8px;margin-bottom:8px;align-items:center;}
+.auditbox .row:last-child{margin-bottom:0;}
+.seg{display:flex;border:1px solid var(--line-strong);border-radius:7px;overflow:hidden;}
+.seg button{padding:5px 12px;background:var(--surface-raised);border:none;border-right:1px solid var(--line-strong);cursor:pointer;font-size:12px;color:var(--ink-dim);}
+.seg button:last-child{border-right:none;}
+.seg button.on{background:var(--accent);color:#fff;}
+.auditbox input[type=text],.auditbox textarea{
+  width:100%;padding:6px 9px;border:1px solid var(--line-strong);border-radius:6px;background:var(--paper);color:var(--ink);
+}
+.auditbox textarea{min-height:56px;resize:vertical;font-family:inherit;}
+.auditbox .savebar{display:flex;align-items:center;gap:10px;margin-top:8px;}
+.btn{padding:6px 14px;border-radius:7px;border:1px solid var(--accent);background:var(--accent);color:#fff;font-weight:600;font-size:12.5px;cursor:pointer;}
+.btn:hover{filter:brightness(1.08);}
+.btn.ghost{background:transparent;color:var(--accent);}
+.savestate{font-size:11.5px;color:var(--ink-dim);}
+.readonly-note{font-size:12px;color:var(--ink-dim);font-style:italic;}
+
+.pager{display:flex;align-items:center;gap:10px;justify-content:center;margin-top:16px;font-size:13px;color:var(--ink-dim);}
+.pager button{padding:5px 12px;border-radius:6px;border:1px solid var(--line-strong);background:var(--surface-raised);cursor:pointer;color:var(--ink);}
+.pager button:disabled{opacity:.4;cursor:default;}
+.pager .mono{color:var(--ink);}
+
+.empty{padding:40px;text-align:center;color:var(--ink-dim);}
+</style>
+
+<div id="app">
+  <div class="masthead">
+    <h1>Match Ledger</h1>
+    <div class="sub">FSA Data Pipeline &middot; <span class="mono" id="asOf"></span></div>
+  </div>
+  <div class="sub" style="margin-bottom:4px;">Every classified FHRS INSERT event, its evidence, and your ground-truth verification in one place.</div>
+
+  <div class="stats" id="stats"></div>
+  <div class="toolbar">
+    <input type="search" id="search" placeholder="Search FHRSID, business name, postcode, authority, or matched company&hellip;">
+    <select id="confFilter">
+      <option value="ALL">Any confidence</option>
+      <option value="HIGH">High</option>
+      <option value="MEDIUM">Medium</option>
+      <option value="LOW">Low</option>
+    </select>
+    <label class="chk"><input type="checkbox" id="gtOnly"> Ground truth only</label>
+    <label class="chk"><input type="checkbox" id="reviewOnly"> Review queue (NEW_VENUE, not HIGH)</label>
+    <label class="chk"><input type="checkbox" id="notedOnly"> Has your notes</label>
+    <div class="count"><span class="mono" id="matchCount"></span> matching</div>
+  </div>
+
+  <div class="tablewrap">
+    <table>
+      <thead>
+        <tr>
+          <th data-sort="id">FHRSID</th>
+          <th data-sort="n">Business</th>
+          <th>Address</th>
+          <th data-sort="au">Authority</th>
+          <th data-sort="cl">Classification</th>
+          <th data-sort="fs">First seen</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+  <div class="pager" id="pager"></div>
+  <div id="dbstate" class="readonly-note" style="margin-top:14px;"></div>
+</div>
+
+<script>
+const RAW_DATA = /*__DATA__*/[]/*__DATA__*/;
+const GENERATED_AT = "__GENERATED_AT__";
+
+const CLASS_META = {
+  NEW_VENUE: {cls:'nv', label:'New venue'},
+  OWNERSHIP_CHANGE: {cls:'oc', label:'Ownership change'},
+  UNKNOWN: {cls:'un', label:'Unknown'},
+};
+
+const state = {
+  search:'', confidence:'ALL', gtOnly:false, reviewOnly:false, notedOnly:false,
+  classFilter:null, sortField:'id', sortDir:'desc', page:1, pageSize:50, expanded:null,
+};
+
+let liveNotes = {};
+let notesCol = null;
+let dbAvailable = null; // null=unknown, true/false once resolved
+
+function fmtDate(d){ return d || '—'; }
+
+function escapeHtml(s){
+  return (s==null?'':String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function effectiveNote(row){
+  return liveNotes[row.id] || row.gt || null;
+}
+
+function computeStats(){
+  const c = {NEW_VENUE:0, OWNERSHIP_CHANGE:0, UNKNOWN:0, gt:0, review:0};
+  for(const r of RAW_DATA){
+    c[r.cl] = (c[r.cl]||0)+1;
+    if(r.gt) c.gt++;
+    if(r.cl==='NEW_VENUE' && r.cf!=='HIGH') c.review++;
+  }
+  return c;
+}
+
+function filteredSorted(){
+  let rows = RAW_DATA;
+  if(state.classFilter) rows = rows.filter(r => r.cl === state.classFilter);
+  if(state.confidence !== 'ALL') rows = rows.filter(r => r.cf === state.confidence);
+  if(state.gtOnly) rows = rows.filter(r => !!r.gt);
+  if(state.reviewOnly) rows = rows.filter(r => r.cl==='NEW_VENUE' && r.cf!=='HIGH');
+  if(state.notedOnly) rows = rows.filter(r => !!liveNotes[r.id]);
+  const q = state.search.trim().toLowerCase();
+  if(q){
+    rows = rows.filter(r =>
+      String(r.id).includes(q) ||
+      (r.n && r.n.toLowerCase().includes(q)) ||
+      (r.pc && r.pc.toLowerCase().includes(q)) ||
+      (r.au && r.au.toLowerCase().includes(q)) ||
+      (r.cand||[]).some(c => (c.n && c.n.toLowerCase().includes(q)) || (c.no && c.no.toLowerCase().includes(q)))
+    );
+  }
+  const f = state.sortField, dir = state.sortDir === 'asc' ? 1 : -1;
+  rows = rows.slice().sort((a,b) => {
+    let av = a[f], bv = b[f];
+    if(av==null) av='';
+    if(bv==null) bv='';
+    if(typeof av === 'string') return av.localeCompare(bv) * dir;
+    return (av - bv) * dir;
+  });
+  return rows;
+}
+
+function renderStats(){
+  const c = computeStats();
+  const chips = [
+    {key:null, cls:'', n:RAW_DATA.length, l:'All events'},
+    {key:'NEW_VENUE', cls:'nv', n:c.NEW_VENUE, l:'New venue'},
+    {key:'OWNERSHIP_CHANGE', cls:'oc', n:c.OWNERSHIP_CHANGE, l:'Ownership change'},
+    {key:'UNKNOWN', cls:'un', n:c.UNKNOWN, l:'Unknown'},
+  ];
+  document.getElementById('stats').innerHTML = chips.map(c2 => `
+    <div class="stat ${c2.cls} ${state.classFilter===c2.key ? 'active':''}" data-classfilter="${c2.key ?? ''}">
+      <span class="n">${c2.n.toLocaleString()}</span>
+      <span class="l">${c2.l}</span>
+    </div>`).join('') +
+    `<div class="stat ${state.gtOnly?'active':''}" id="gtChip"><span class="n">${c.gt}</span><span class="l">Ground truth</span></div>` +
+    `<div class="stat ${state.reviewOnly?'active':''}" id="reviewChip"><span class="n">${c.review}</span><span class="l">Review queue</span></div>`;
+
+  document.getElementById('stats').querySelectorAll('[data-classfilter]').forEach(el => {
+    el.addEventListener('click', () => {
+      const v = el.getAttribute('data-classfilter');
+      state.classFilter = v === '' ? null : v;
+      state.page = 1;
+      render();
+    });
+  });
+  document.getElementById('gtChip').addEventListener('click', () => {
+    state.gtOnly = !state.gtOnly; state.page=1; render();
+  });
+  document.getElementById('reviewChip').addEventListener('click', () => {
+    state.reviewOnly = !state.reviewOnly; state.page=1; render();
+  });
+}
+
+function candFlags(c){
+  const flags = [];
+  if(c.am) flags.push('address match');
+  if(c.hd) flags.push('formation agent');
+  if(c.st === 'n') flags.push('national');
+  return flags;
+}
+
+function renderDetail(row){
+  const note = liveNotes[row.id] || {};
+  const seedGt = row.gt || {};
+  const rmf = note.rmf !== undefined ? note.rmf : (seedGt.rmf || '');
+  const rcn = note.rcn !== undefined ? note.rcn : (seedGt.rcn || '');
+  const notesText = note.notes !== undefined ? note.notes : (seedGt.notes || '');
+
+  const candsHtml = (row.cand||[]).map(c => `
+    <div class="cand">
+      <div>
+        <div class="cname">${escapeHtml(c.n)}</div>
+        <div class="cmeta mono">${escapeHtml(c.no)} &middot; inc. ${fmtDate(c.dc)}</div>
+        <div class="flags">${candFlags(c).map(f=>`<span class="flag">${f}</span>`).join('')}</div>
+      </div>
+      <div class="cscore">${c.s?.toFixed ? c.s.toFixed(4) : c.s}</div>
+    </div>`).join('') || '<div class="readonly-note">No candidates found.</div>';
+
+  const dbNote = dbAvailable === false
+    ? '<div class="readonly-note">Notes are read-only in this view (live editing unavailable).</div>'
+    : '';
+
+  return `
+    <div class="detail-inner">
+      <div>
+        <h4>Reason</h4>
+        <div class="reason">${escapeHtml(row.rs)}</div>
+        <h4 style="margin-top:16px;">Top candidates</h4>
+        <div class="cands">${candsHtml}</div>
+      </div>
+      <div>
+        <h4>Your verification</h4>
+        <div class="auditbox" data-fhrsid="${row.id}">
+          <div class="row">
+            <span style="color:var(--ink-dim);font-size:12px;">Real match found</span>
+            <div class="seg" data-field="rmf">
+              <button data-val="y" class="${rmf==='y'?'on':''}">Yes</button>
+              <button data-val="n" class="${rmf==='n'?'on':''}">No</button>
+              <button data-val="" class="${rmf===''?'on':''}">&mdash;</button>
+            </div>
+          </div>
+          <div class="row">
+            <input type="text" data-field="rcn" placeholder="Real company number" value="${escapeHtml(rcn)}">
+          </div>
+          <div class="row">
+            <textarea data-field="notes" placeholder="Notes&hellip;">${escapeHtml(notesText)}</textarea>
+          </div>
+          <div class="savebar">
+            <button class="btn" data-action="save">Save</button>
+            <span class="savestate"></span>
+          </div>
+          ${dbNote}
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderRows(){
+  const rows = filteredSorted();
+  document.getElementById('matchCount').textContent = rows.length.toLocaleString();
+
+  const start = (state.page-1)*state.pageSize;
+  const pageRows = rows.slice(start, start+state.pageSize);
+
+  const tbody = document.getElementById('tbody');
+  if(pageRows.length === 0){
+    tbody.innerHTML = `<tr><td colspan="6"><div class="empty">No events match these filters.</div></td></tr>`;
+  } else {
+    tbody.innerHTML = pageRows.map(row => {
+      const meta = CLASS_META[row.cl] || CLASS_META.UNKNOWN;
+      const note = effectiveNote(row);
+      const hasLive = !!liveNotes[row.id];
+      const isExpanded = state.expanded === row.id;
+      return `
+        <tr class="row ${isExpanded?'expanded':''}" data-id="${row.id}">
+          <td class="id mono">${row.gt ? '<span class="gtbadge" title="Ground truth sample">GT</span>' : ''}${row.id}</td>
+          <td class="name">${escapeHtml(row.n)}${hasLive ? '<span class="notedot" title="Has your notes"></span>' : ''}</td>
+          <td class="addr">${escapeHtml(row.a||'')}<br><span class="pc mono">${escapeHtml(row.pc||'')}</span></td>
+          <td>${escapeHtml(row.au||'')}</td>
+          <td><span class="pill ${meta.cls}"><span class="dot"></span>${meta.label}</span> <span class="conf ${row.cf}">${row.cf}</span></td>
+          <td class="mono">${fmtDate(row.fs)}</td>
+        </tr>
+        ${isExpanded ? `<tr class="detail"><td colspan="6">${renderDetail(row)}</td></tr>` : ''}
+      `;
+    }).join('');
+  }
+
+  tbody.querySelectorAll('tr.row').forEach(tr => {
+    tr.addEventListener('click', () => {
+      const id = Number(tr.getAttribute('data-id'));
+      state.expanded = state.expanded === id ? null : id;
+      render();
+    });
+  });
+
+  tbody.querySelectorAll('.auditbox').forEach(box => {
+    box.addEventListener('click', (e) => e.stopPropagation());
+    box.querySelectorAll('.seg button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        box.querySelectorAll('.seg button').forEach(b=>b.classList.remove('on'));
+        btn.classList.add('on');
+      });
+    });
+    const saveBtn = box.querySelector('[data-action="save"]');
+    saveBtn.addEventListener('click', async () => {
+      const fhrsid = box.getAttribute('data-fhrsid');
+      const rmfBtn = box.querySelector('.seg button.on');
+      const data = {
+        rmf: rmfBtn ? rmfBtn.getAttribute('data-val') : '',
+        rcn: box.querySelector('[data-field="rcn"]').value.trim(),
+        notes: box.querySelector('[data-field="notes"]').value.trim(),
+      };
+      const stateEl = box.querySelector('.savestate');
+      if(!notesCol){
+        stateEl.textContent = 'Unavailable — not connected';
+        return;
+      }
+      stateEl.textContent = 'Saving…';
+      try{
+        await notesCol.doc(fhrsid).set({...data, updatedAt: new Date().toISOString()});
+        stateEl.textContent = 'Saved';
+      }catch(err){
+        stateEl.textContent = 'Save failed — ' + (err && err.code ? err.code : 'error');
+      }
+    });
+  });
+
+  renderPager(rows.length);
+}
+
+function renderPager(total){
+  const pages = Math.max(1, Math.ceil(total/state.pageSize));
+  if(state.page > pages) state.page = pages;
+  document.getElementById('pager').innerHTML = `
+    <button id="prevPage" ${state.page<=1?'disabled':''}>&larr; Prev</button>
+    <span>Page <span class="mono">${state.page}</span> of <span class="mono">${pages}</span></span>
+    <button id="nextPage" ${state.page>=pages?'disabled':''}>Next &rarr;</button>
+  `;
+  const prev = document.getElementById('prevPage');
+  const next = document.getElementById('nextPage');
+  if(prev) prev.addEventListener('click', () => { state.page--; render(); });
+  if(next) next.addEventListener('click', () => { state.page++; render(); });
+}
+
+function renderSortHeaders(){
+  document.querySelectorAll('thead th[data-sort]').forEach(th => {
+    const f = th.getAttribute('data-sort');
+    th.classList.toggle('sorted', state.sortField===f);
+    th.querySelector('.arrow')?.remove();
+    if(state.sortField===f){
+      th.insertAdjacentHTML('beforeend', `<span class="arrow">${state.sortDir==='asc'?'↑':'↓'}</span>`);
+    }
+  });
+}
+
+function render(){
+  renderStats();
+  renderSortHeaders();
+  renderRows();
+}
+
+document.getElementById('search').addEventListener('input', (e) => {
+  state.search = e.target.value; state.page = 1; render();
+});
+document.getElementById('confFilter').addEventListener('change', (e) => {
+  state.confidence = e.target.value; state.page = 1; render();
+});
+document.getElementById('gtOnly').addEventListener('change', (e) => {
+  state.gtOnly = e.target.checked; state.page = 1; render();
+});
+document.getElementById('reviewOnly').addEventListener('change', (e) => {
+  state.reviewOnly = e.target.checked; state.page = 1; render();
+});
+document.getElementById('notedOnly').addEventListener('change', (e) => {
+  state.notedOnly = e.target.checked; state.page = 1; render();
+});
+document.querySelectorAll('thead th[data-sort]').forEach(th => {
+  th.addEventListener('click', () => {
+    const f = th.getAttribute('data-sort');
+    if(state.sortField === f){ state.sortDir = state.sortDir==='asc'?'desc':'asc'; }
+    else { state.sortField = f; state.sortDir = 'asc'; }
+    render();
+  });
+});
+
+document.getElementById('asOf').textContent = GENERATED_AT;
+
+render();
+
+(async () => {
+  try{
+    const db = await claude.use('db');
+    if(!db){
+      dbAvailable = false;
+      document.getElementById('dbstate').textContent = 'Live notes unavailable in this view — verification is read-only.';
+      render();
+      return;
+    }
+    dbAvailable = true;
+    notesCol = db.collection('notes');
+    notesCol.onSnapshot(snap => {
+      const next = {};
+      snap.docs.forEach(d => { next[d.id] = d.data(); });
+      liveNotes = next;
+      render();
+    }, err => {
+      console.error('notes subscription error', err);
+    });
+  }catch(err){
+    dbAvailable = false;
+    console.error(err);
+  }
+})();
+</script>

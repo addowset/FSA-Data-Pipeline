@@ -570,8 +570,10 @@ filterable, self-serve tool.
 event, cross-references a ground-truth CSV by FHRSID, and writes a
 compact JSON export (field names deliberately short -- see the script
 docstring -- since this gets embedded directly in the tool's HTML,
-multiplied by several thousand rows). That JSON is spliced into a
-static HTML/JS page and published as a Claude Artifact; verification
+multiplied by several thousand rows). `tools/audit_ledger_template.html`
+is the tool's actual source (CSS + JS, no data, with a
+`/*__DATA__*/[]/*__DATA__*/` placeholder) -- see the comment at the top
+of that file for the exact splice-and-republish steps. Verification
 notes are stored in the artifact's own live database (a `notes`
 collection keyed by FHRSID), not written back to any file in this repo
 -- the CSV stays a point-in-time seed, the artifact is the current
@@ -584,9 +586,11 @@ classify first):
 python scripts/export_audit_data.py --ground-truth ground_truth_sample_v4.csv --output audit_data.json
 ```
 
-Then ask Claude to re-splice and republish the artifact -- the export
-script only produces the data file, it doesn't publish. The published
-tool's URL is recorded in the assistant's memory, not in this repo (it's
+Then ask Claude to splice `audit_data.json` into
+`tools/audit_ledger_template.html` and republish the artifact -- the
+export script only produces the data file, it doesn't publish. The
+published tool's URL is recorded in the assistant's memory, not in this
+repo (it's
 a personal, private artifact, not a build output).
 
 ## Running tests
