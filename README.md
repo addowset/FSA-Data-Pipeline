@@ -345,6 +345,43 @@ for an honest and instructive set of reasons:
   pre-existing national-channel limitation, unrelated to SIC scope --
   worth a future look, not addressed here.
 
+**Known gap, documented not built (2026-09-08): national channel misses
+multi-branch chains whose company names bake in a location suffix.**
+Investigated after "Sourdough Sophia" (FHRSID 1981187, Crouch End)
+stayed `UNKNOWN` despite all 8 real "Sourdough Sophia" branch companies
+being in the pool. Root cause: `name_similarity` is symmetric
+(`shared/union`), so a branch name like "Sourdough Sophia Crouch End
+Ltd" scores only 0.52-0.69 against "Sourdough Sophia" -- every extra
+word (the location suffix) dilutes the score, well below the national
+channel's 0.9 threshold, even though a human reads it as an obvious
+match.
+
+**Important: fixing this wouldn't have changed this specific venue's
+outcome.** "Sourdough Sophia Crouch End Ltd" was incorporated 405 days
+before the FHRS record appeared -- more than double the 180-day
+recency gate -- so it would still be rejected as NEW_VENUE evidence
+even with perfect name-matching. The case that prompted this
+investigation is a false lead for that one venue, though the underlying
+matching gap is real for other, more freshly-incorporated cases.
+
+Tested the obvious fix (treat a word-for-word name prefix as a match)
+against the real backlog before proposing it, and it's unsafe on its
+own: 425 UNKNOWN establishments have a prefix-matching, recently-
+incorporated company, but most are coincidences, not chains -- "Bean
+There" prefix-matches 9 unrelated companies at 9 different addresses
+nationwide (independent businesses landing on the same pun), which a
+naive fix would wrongly treat as strong evidence.
+
+What actually separates the real cases from the coincidences, confirmed
+against real data: genuine chains share a registered address across
+their sibling companies (Sourdough Sophia's 8 companies cluster at 2
+addresses; 3 of the 9 "Bean There" companies plausibly are a real small
+chain, sharing one address, while the other 6 are each at a unique,
+unrelated address). A safe version of this feature would require BOTH a
+name-prefix match AND a sibling company (same prefix) at the same
+registered address -- not implemented, left here as a validated,
+scoped starting point if the multi-branch-chain pattern comes up again.
+
 Not yet built: metrics/monitoring, CSV export.
 
 Live-API collection for priority authorities (the original South West
