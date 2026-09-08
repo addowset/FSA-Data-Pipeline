@@ -7,9 +7,13 @@ verification notes stored in the artifact's own database.
 This file is the reusable source: CSS + JS, no data. To rebuild and
 republish the live tool:
   1. python scripts/export_audit_data.py --output audit_data.json
-  2. Splice that JSON in place of the /*__DATA__*/[]/*__DATA__*/
-     placeholder below (replace the whole `[]` between the markers),
-     and __GENERATED_AT__ with today's date.
+  2. Splice that JSON in place of the data placeholder in the <script>
+     block below (the empty array flanked by DATA markers -- replace
+     the whole array, not the markers themselves; whatever text you
+     search for must appear ONLY there, not in this comment, or a
+     naive string-replace will also match this description and double
+     the output -- this bit the first version of this file), and
+     __GENERATED_AT__ with today's date.
   3. Publish the assembled file as a Claude Artifact with capabilities
      {"db": {}}, passing the existing artifact's `url` so it updates in
      place rather than creating a new one. The URL is recorded in the

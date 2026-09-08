@@ -9,3 +9,9 @@ venv/
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Generated audit-tool data/output -- reproducible from the DB via
+# scripts/export_audit_data.py + tools/audit_ledger_template.html,
+# not source.
+tools/audit_data.json
+tools/audit_ledger.html
