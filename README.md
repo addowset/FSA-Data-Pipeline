@@ -308,10 +308,42 @@ Burger King (`47110`, `47190`, `70100`) were deliberately **not**
 recommended -- those are enormous, mostly food-irrelevant SIC codes
 (all general retail, all corporate head offices) that would balloon the
 pool for little genuine per-venue signal, exactly the "chain match, not
-venue-specific" problem the discount above exists to catch. SIC-scope
-widening itself has not been implemented -- pending confirmation on the
-exact code list, per the brief's own explicit instruction ("look up the
-exact codes and confirm them with me").
+venue-specific" problem the discount above exists to catch.
+
+**Implemented the same day**, once the user confirmed the narrow list.
+Full-history recollection under the widened SIC set: 280,620 total hits
+(up from ~260,000), 19,667 newly first-seen companies. Rematch +
+reclassify of the full 5,880-event backlog: +26 events flipped from
+`UNKNOWN` to `NEW_VENUE`, `OWNERSHIP_CHANGE` unchanged (586 -- expected,
+it's driven by FHRS address history, company match is only corroboration
+there). 148 classifications now cite a company found specifically via
+one of the 3 new codes, including genuine `NEW_VENUE`/HIGH matches
+("Browny Africa Shop Ltd", "Dam Coffee Ltd", "Tin and Brine Ltd") and one
+`OWNERSHIP_CHANGE` ("Grain Culture Ltd", a bakery, SIC 10710).
+
+Checked the three headline examples from the investigation individually
+rather than assuming the widening fixed them -- it fixed one of three,
+for an honest and instructive set of reasons:
+- **"Park Hive CIC" -- still unmatched, correctly.** Its real SIC (96040)
+  was never part of the recommended narrow list; this was always an
+  illustrative example of the general phenomenon, not a code the
+  widening was meant to catch.
+- **"Little Dessert Shop" -- still unmatched, correctly.** The real
+  Wigan entity's SIC is `47190` (general non-specialised retail) -- a
+  *different* code from the `47290` (specialised food retail) that was
+  actually added, and one of the broad retail codes deliberately
+  excluded for the same "chain match" reason as Aldi/Lidl. Conflating
+  47190 and 47290 informally while summarizing the investigation was a
+  real error worth flagging here, not smoothing over.
+- **"Sourdough Sophia" -- now collectible, but still not matching, and
+  this exposed a real, separate limitation.** All 8 real "Sourdough
+  Sophia" companies are now in the pool (SIC 47290 correctly caught
+  them) -- but each branch is registered as its own company with the
+  branch location baked into the name ("SOURDOUGH SOPHIA CROUCH END
+  LTD"), which dilutes national-channel name similarity below the
+  strict 0.9 threshold even for the exactly-correct branch. This is a
+  pre-existing national-channel limitation, unrelated to SIC scope --
+  worth a future look, not addressed here.
 
 Not yet built: metrics/monitoring, CSV export.
 

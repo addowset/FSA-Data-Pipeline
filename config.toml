@@ -21,7 +21,29 @@ raw_dir = "raw/companies-house"
 # Companies House's own SIC code usage, and against the brief with the
 # user on 2026-08-24 (56301 "Licensed clubs" included as drink-serving,
 # even though it's nightlife-adjacent rather than food service).
-sic_codes = ["56101", "56102", "56103", "56210", "56290", "56301", "56302"]
+#
+# Widened 2026-09-08 with 3 food-adjacent codes, confirmed against real
+# ground-truth misses (a live sweep of the 59 UNKNOWN ground-truth rows
+# against Companies House unfiltered by SIC -- see README "Design
+# notes"): small food producers and specialist retailers are routinely
+# registered outside the food-*service* division. Deliberately NOT
+# widened to the broad retail/head-office codes (47110, 47190, 70100)
+# that would catch supermarkets and franchise parents (Aldi, Lidl, Burger
+# King) -- confirmed real too, but those match one giant national parent
+# company to every single store, which is exactly what
+# is_multi_venue_company (fsa_pipeline/classifier.py) exists to discount,
+# not a reason to balloon collection scope for near-zero per-venue signal.
+# - 10710: manufacture of bread, fresh pastry goods and cakes (real case:
+#   "Sourdough Sophia Production Limited")
+# - 47290: other retail sale of food in specialised stores
+# - 46370: wholesale of coffee, tea, cocoa and spices
+# Confirmed live hit counts before adding (active companies only):
+# 10710=5,760, 47290=12,981, 46370=4,524 (~23,265 combined, ~9% growth on
+# the existing ~260,000-company pool).
+sic_codes = [
+    "56101", "56102", "56103", "56210", "56290", "56301", "56302",
+    "10710", "47290", "46370",
+]
 # Rolling trailing window re-fetched every day (like FHRS's daily bulk
 # re-fetch) rather than a strict single-day cutoff, to absorb any
 # indexing lag between a company's incorporation and it becoming
