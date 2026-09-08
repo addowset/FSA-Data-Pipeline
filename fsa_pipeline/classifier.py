@@ -194,6 +194,19 @@ def find_existing_operator(
     )
 
 
+def count_operator_venues(company_number: str, operator_index: dict) -> int:
+    """How many distinct FHRS venues this company is already the confident
+    match for, nationally. Added 2026-09-08 alongside the SIC-scope
+    widening investigation: a company that matches many venues nationally
+    (a supermarket or franchise parent, e.g. "Aldi Stores Limited" against
+    every Aldi store in the country) isn't venue-specific corroborating
+    evidence -- matching it to any one new venue proves nothing about that
+    venue in particular. See is_multi_venue_company in classify(), and
+    the existing is_high_density_address discount this mirrors (same
+    idea, name axis instead of address axis)."""
+    return len(operator_index.get(company_number, []))
+
+
 def _is_recently_incorporated(date_of_creation: str | None, first_seen_date: str, max_age_days: int) -> bool:
     """A match only counts as NEW_VENUE-worthy evidence if the company was
     incorporated within max_age_days of the FHRS record appearing --
@@ -234,6 +247,7 @@ def classify(
     predecessor: Predecessor | None,
     existing_operator: Predecessor | None,
     config: Config,
+    operator_venue_count: int = 0,
 ) -> Classification:
     if predecessor is not None:
         reason = (
@@ -273,10 +287,19 @@ def classify(
                 evidence_company_number=best_candidate.company_number,
             )
 
+        is_multi_venue_company = operator_venue_count >= config.multi_venue_company_threshold
+
         if score >= config.new_venue_high_threshold:
-            confidence = "LOW" if (best_candidate.is_high_density_address and score < 0.95) else "HIGH"
+            # The near-exact-match escape hatch (score >= 0.95) only makes
+            # sense for is_high_density_address -- a strong name match can
+            # rescue an ambiguous shared-address case. It does NOT apply to
+            # is_multi_venue_company: a perfect name score is the expected,
+            # unremarkable outcome for a chain/national-retailer parent
+            # (every single Aldi store scores 1.0 against "Aldi Stores
+            # Limited"), so name strength can't rescue this one.
+            confidence = "LOW" if ((best_candidate.is_high_density_address and score < 0.95) or is_multi_venue_company) else "HIGH"
         else:
-            confidence = "LOW" if best_candidate.is_high_density_address else "MEDIUM"
+            confidence = "LOW" if (best_candidate.is_high_density_address or is_multi_venue_company) else "MEDIUM"
 
         reason = (
             f"Matched Companies House company \"{best_candidate.company_name}\" "
@@ -294,7 +317,13 @@ def classify(
                 " Registered address is an exact match for this establishment's address -- "
                 "independent corroboration alongside the name match."
             )
-        if existing_operator is not None:
+        if is_multi_venue_company:
+            reason += (
+                f" This company already appears to operate {operator_venue_count} FHRS-registered "
+                f"venues nationally -- treated as a chain/large-operator match, not venue-specific "
+                f"corroboration."
+            )
+        elif existing_operator is not None:
             reason += (
                 f" Note: this company already operates another FHRS-registered venue: "
                 f"\"{existing_operator.business_name}\" (FHRSID {existing_operator.fhrsid}), "

@@ -69,6 +69,7 @@ class Config:
     new_venue_medium_threshold: float
     new_venue_max_incorporation_age_days: int
     address_history_fallback_threshold: float
+    multi_venue_company_threshold: int
 
     @property
     def user_agent(self) -> str:
@@ -129,4 +130,5 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         new_venue_medium_threshold=float(classification["new_venue_medium_threshold"]),
         new_venue_max_incorporation_age_days=int(classification["new_venue_max_incorporation_age_days"]),
         address_history_fallback_threshold=float(classification["address_history_fallback_threshold"]),
+        multi_venue_company_threshold=int(classification["multi_venue_company_threshold"]),
     )

@@ -37,6 +37,7 @@ from fsa_pipeline.classifier import (
     build_company_operator_index,
     build_postcode_index,
     classify,
+    count_operator_venues,
     find_existing_operator,
     find_predecessor,
 )
@@ -159,8 +160,10 @@ def run(force: bool) -> int:
         candidates_found = match_counts.get(f"{fhrsid}|{collection_date}", 0)
 
         existing_operator = None
+        operator_venue_count = 0
         if best_candidate is not None:
             existing_operator = find_existing_operator(fhrsid, best_candidate.company_number, first_seen_date, operator_index)
+            operator_venue_count = count_operator_venues(best_candidate.company_number, operator_index)
 
         result = classify(
             first_seen_date=first_seen_date,
@@ -170,6 +173,7 @@ def run(force: bool) -> int:
             predecessor=predecessor,
             existing_operator=existing_operator,
             config=config,
+            operator_venue_count=operator_venue_count,
         )
 
         db.record_classification(conn, fhrsid, authority_code, collection_date, result, now_iso())

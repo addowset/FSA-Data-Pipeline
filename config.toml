@@ -134,6 +134,20 @@ new_venue_max_incorporation_age_days = 180
 # postcode hosts 11), so postcode alone isn't enough evidence.
 address_history_fallback_threshold = 0.9
 
+# A company already confidently matched (>= new_venue_medium_threshold) to
+# this many distinct FHRS venues nationally is treated as a chain/large-
+# operator match, not venue-specific corroboration -- discounts confidence
+# the same way is_high_density_address does for a formation-agent address,
+# just on the name axis instead. Added 2026-09-08 alongside investigating
+# widening Companies House SIC scope: "ALDI STORES LIMITED" or a national
+# franchise's operating company would otherwise match every single new
+# store nationally with the same "corroborating" evidence, which proves
+# nothing about any one specific venue. Same default as
+# high_density_address_threshold -- not yet calibrated against a real
+# multi-venue-company event (no SIC widening has run yet), revisit once
+# one occurs.
+multi_venue_company_threshold = 5
+
 [contact]
 # Used in the User-Agent header sent with every request, per FSA's request
 # for an honest, identifiable client. Not a secret.

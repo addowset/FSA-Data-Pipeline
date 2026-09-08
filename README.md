@@ -266,6 +266,53 @@ name at the same site. The Companies House match in the reason string
 only ever corroborates the *new* occupant; it says nothing about who ran
 the old one.
 
+**SIC-scope investigation and the multi-venue discount (2026-09-08)** — the
+user asked which of the original brief's restrictions, if relaxed, might
+improve match coverage. Investigated the `56xxx`-only Companies House SIC
+filter by sweeping all 59 `UNKNOWN` rows in the ground-truth sample
+against Companies House **unfiltered by SIC**: 28 had no name-overlapping
+company at all (expected -- many independent cafés are sole traders, per
+the brief), but 13 turned up an active company excluded purely by SIC
+code. Real confirmed examples: "Park Hive CIC" (exact name, exact
+postcode district, wrong SIC entirely), "Sourdough Sophia Production
+Limited" (SIC `10710`, bread manufacture -- small bakeries often sit
+under manufacturing, not food-service, SIC), "Little Dessert Shop
+(Wigan) Limited" (SIC `47190`, retail). But also Aldi, Lidl, and Burger
+King franchise operators -- all real, all excluded by SIC, but matching
+to one giant national/parent company that would hit on every single
+store nationwide, not venue-specific evidence.
+
+That surfaced a real gap independent of whether SIC scope ever widens:
+nothing discounted a company already confidently matched to *many* FHRS
+venues nationally. Added `count_operator_venues` / `is_multi_venue_company`
+(`fsa_pipeline/classifier.py`, `multi_venue_company_threshold` in
+`config.toml`, default 5) -- mirrors the existing
+`is_high_density_address` formation-agent discount, just on the name axis
+instead of the address axis. Caught by the test suite before shipping: the
+first version reused `is_high_density_address`'s "score >= 0.95 escape
+hatch" (a near-exact name match can rescue an ambiguous shared-address
+case), which would have let a *perfect* name match bypass the multi-venue
+discount entirely -- exactly the failure mode being guarded against,
+since every single Aldi store scores 1.0 against "Aldi Stores Limited".
+Fixed so multi-venue discounting is unconditional on score. Currently
+dormant (0 of 5,880 classified events trigger it) since no SIC widening
+has happened yet -- it's a safety net ready for if/when the SIC filter
+is ever widened, not something with observable effect today.
+
+Checked real hit-counts before proposing anything (not guessing): a
+narrow, food-adjacent SIC addition (`10710` bread manufacture, `47290`
+specialised food retail, `46370` food/drink wholesale) would add ~23,000
+active companies to the ~260,000-company pool -- a bounded, plausible
+widening. The broad retail codes that would actually catch Aldi/Lidl/
+Burger King (`47110`, `47190`, `70100`) were deliberately **not**
+recommended -- those are enormous, mostly food-irrelevant SIC codes
+(all general retail, all corporate head offices) that would balloon the
+pool for little genuine per-venue signal, exactly the "chain match, not
+venue-specific" problem the discount above exists to catch. SIC-scope
+widening itself has not been implemented -- pending confirmation on the
+exact code list, per the brief's own explicit instruction ("look up the
+exact codes and confirm them with me").
+
 Not yet built: metrics/monitoring, CSV export.
 
 Live-API collection for priority authorities (the original South West

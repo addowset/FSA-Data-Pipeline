@@ -8,6 +8,7 @@ from fsa_pipeline.classifier import (
     build_company_operator_index,
     build_postcode_index,
     classify,
+    count_operator_venues,
     find_existing_operator,
     find_predecessor,
 )
@@ -42,6 +43,7 @@ def make_config(**overrides) -> Config:
         live_backoff_factor=1.0, postcode_recheck_after_days=30,
         new_venue_high_threshold=0.85, new_venue_medium_threshold=0.6,
         new_venue_max_incorporation_age_days=180, address_history_fallback_threshold=0.9,
+        multi_venue_company_threshold=5,
     )
     return dataclasses.replace(base, **overrides)
 
@@ -218,6 +220,19 @@ def test_find_existing_operator_different_company_ignored():
     ])
     result = find_existing_operator(2, "123", "2026-08-21", index)
     assert result is None
+
+
+# --- multi-venue-company discount (chain/national-retailer case) ---
+
+def test_count_operator_venues_counts_all_matches_for_a_company():
+    index = build_company_operator_index([
+        {"fhrsid": 1, "company_number": "123", "business_name": "Store 1", "first_seen_date": "2026-01-01"},
+        {"fhrsid": 2, "company_number": "123", "business_name": "Store 2", "first_seen_date": "2026-02-01"},
+        {"fhrsid": 3, "company_number": "999", "business_name": "Unrelated", "first_seen_date": "2026-01-01"},
+    ])
+    assert count_operator_venues("123", index) == 2
+    assert count_operator_venues("999", index) == 1
+    assert count_operator_venues("no-such-company", index) == 0
 
 
 # --- classify ---
@@ -417,6 +432,53 @@ def test_classify_new_venue_notes_existing_operator():
     assert "Soul Mama Islington" in result.reason
     assert "additional site" in result.reason
     assert result.evidence_existing_operator_fhrsid == 1
+
+
+# --- multi-venue-company discount (chain/national-retailer case) ---
+
+def test_classify_new_venue_downgrades_confidence_for_multi_venue_company():
+    """The Aldi/Burger King case: a company already matched to many FHRS
+    venues nationally isn't venue-specific corroboration, even at a
+    perfect name score -- same treatment as a formation-agent address."""
+    candidate = make_candidate(score=1.0, date_of_creation="2026-08-01")
+
+    result = classify(
+        first_seen_date="2026-08-20", postcode="NG17 3GA", candidates_found=1, best_candidate=candidate,
+        predecessor=None, existing_operator=None, config=make_config(), operator_venue_count=5,
+    )
+
+    assert result.classification == "NEW_VENUE"
+    assert result.confidence == "LOW"
+    assert "5 FHRS-registered" in result.reason
+    assert "chain/large-operator match" in result.reason
+
+
+def test_classify_new_venue_below_multi_venue_threshold_not_downgraded():
+    candidate = make_candidate(score=1.0, date_of_creation="2026-08-01")
+
+    result = classify(
+        first_seen_date="2026-08-20", postcode="NG17 3GA", candidates_found=1, best_candidate=candidate,
+        predecessor=None, existing_operator=None, config=make_config(), operator_venue_count=4,
+    )
+
+    assert result.confidence == "HIGH"
+    assert "chain/large-operator match" not in result.reason
+
+
+def test_classify_multi_venue_note_takes_precedence_over_existing_operator_note():
+    """Showing one example venue out of many nationally isn't useful once
+    the company is already flagged as a chain -- the chain note replaces
+    it rather than both appearing."""
+    candidate = make_candidate(score=1.0, date_of_creation="2026-08-01")
+    existing_operator = Predecessor(fhrsid=1, business_name="Some Other Branch", first_seen_date="2026-05-01", last_seen_date="2026-05-01")
+
+    result = classify(
+        first_seen_date="2026-08-20", postcode="NG17 3GA", candidates_found=1, best_candidate=candidate,
+        predecessor=None, existing_operator=existing_operator, config=make_config(), operator_venue_count=5,
+    )
+
+    assert "chain/large-operator match" in result.reason
+    assert "additional site" not in result.reason
 
 
 # --- exact-address corroboration (the "Best Grill Bristol" case) ---
