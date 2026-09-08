@@ -60,6 +60,7 @@ def main() -> None:
     print(f"wiping {config.db_path}")
     conn = db.connect(config.db_path)
     conn.executescript(
+        "DROP TABLE IF EXISTS officer_churn_checks;"
         "DROP TABLE IF EXISTS classifications;"
         "DROP TABLE IF EXISTS company_match_candidates;"
         "DROP TABLE IF EXISTS company_match_runs;"
@@ -109,6 +110,11 @@ def main() -> None:
         print("no Companies House raw archive found, skipping companies/matching replay")
 
     run_once("classify_insertions.py")
+
+    # Opt-in and disabled by default (config.toml's [officer_churn]) --
+    # a no-op unless the user has explicitly enabled it, same as every
+    # other step here being skippable when its raw archive is absent.
+    run_once("check_officer_churn.py")
 
     print("rebuild complete")
 

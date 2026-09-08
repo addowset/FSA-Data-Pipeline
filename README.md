@@ -382,6 +382,45 @@ name-prefix match AND a sibling company (same prefix) at the same
 registered address -- not implemented, left here as a validated,
 scoped starting point if the multi-branch-chain pattern comes up again.
 
+**Officer-churn signal for OWNERSHIP_CHANGE (2026-09-08, opt-in, off by
+default)** — the user asked to look into improving `OWNERSHIP_CHANGE`
+without the brief's GDPR-driven "no named individuals" restriction. As
+built, `OWNERSHIP_CHANGE` only detects venue turnover (a different FHRS
+record previously existed at this address), not genuine change of legal
+control — the two look identical without director data. Real
+diagnostic check against Companies House's `/officers` endpoint (schema
+only, name redacted) confirmed it returns name, date of birth
+(month/year), nationality, service address, and (new since the 2024
+Economic Crime and Corporate Transparency Act reforms) identity
+verification detail including a `preferred_name` — unambiguously
+personal data under UK GDPR, public register or not; being public
+doesn't exempt processing it from GDPR, and individuals can object to
+third-party commercial re-use of it.
+
+Given that, this was scoped narrowly and shipped **disabled by
+default** (`config.toml`'s `[officer_churn].enabled = false`):
+`fsa_pipeline/officer_churn.py`'s `compute_officer_churn_signal` is the
+sole function permitted to read a raw officer list, and it reads only
+`appointed_on`/`resigned_on` — never name, DOB, nationality, or address,
+even though they're present in the input. Only three numbers
+(`officer_count`, `appointed_near_event`, `resigned_near_event`) are
+ever persisted, in a new `officer_churn_checks` table; the raw officer
+list is discarded the instant the aggregate is computed, never logged.
+`scripts/check_officer_churn.py` only ever fetches officers for a
+company already cited as `OWNERSHIP_CHANGE` evidence — never the whole
+~283K-company pool — keeping exposure to a few hundred companies, not
+the whole collection.
+
+This still means real personal data is processed at fetch time even
+though nothing about an individual is retained afterward — smaller and
+easier to justify than storing names, but not a compliance non-issue.
+**Left disabled; get it reviewed before enabling in a commercial
+deployment.** Verified end-to-end against one real company (7 officers,
+correctly returned "no churn detected" — a stable board): only the
+three-number aggregate ever reached the database. 15 new tests
+(including one asserting the signal object structurally cannot carry a
+personal field), 171 total passing.
+
 Not yet built: metrics/monitoring, CSV export.
 
 Live-API collection for priority authorities (the original South West

@@ -179,6 +179,28 @@ def fetch_page(
     return content
 
 
+OFFICERS_URL_TEMPLATE = "https://api.company-information.service.gov.uk/company/{company_number}/officers"
+
+
+def fetch_officers(session: requests.Session, config: Config, company_number: str) -> list[dict]:
+    """Raw officer (director) list for one company -- see config.toml's
+    [officer_churn] section before calling this at all. EVERY field in
+    each returned item (name, date_of_birth, nationality, address, ...)
+    is personal data under UK GDPR. The only permitted use of this
+    return value is immediately reducing it to an aggregate signal via
+    fsa_pipeline.officer_churn.compute_officer_churn_signal and then
+    discarding it -- never log it, store it, or pass it anywhere else.
+    Caller must also respect config.toml's [officer_churn].enabled and
+    only call this for a company already cited as OWNERSHIP_CHANGE
+    evidence -- never for the whole company pool."""
+    url = OFFICERS_URL_TEMPLATE.format(company_number=company_number)
+    response = session.get(url, timeout=config.ch_timeout_seconds)
+    response.raise_for_status()
+    if not response.content:
+        return []
+    return json.loads(response.content).get("items", [])
+
+
 def hits_from_page_bytes(page_bytes: bytes) -> int:
     data = json.loads(page_bytes)
     return int(data.get("hits", 0))

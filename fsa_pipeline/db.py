@@ -300,6 +300,26 @@ CREATE TABLE IF NOT EXISTS classifications (
 );
 CREATE INDEX IF NOT EXISTS idx_classifications_authority_date
     ON classifications(authority_code, insert_collection_date);
+
+-- Officer-churn signal (fsa_pipeline/officer_churn.py, config.toml's
+-- [officer_churn] -- opt-in, disabled by default). Deliberately
+-- aggregate-only: NEVER add a column here for any per-officer field
+-- (name, date_of_birth, nationality, address, ...) -- see the module
+-- docstring for why this boundary exists before "helpfully" widening it.
+-- One row per (company_number, fhrsid) checked; only companies already
+-- cited as OWNERSHIP_CHANGE evidence are ever checked, never the whole
+-- company pool.
+CREATE TABLE IF NOT EXISTS officer_churn_checks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_number TEXT NOT NULL,
+    fhrsid INTEGER NOT NULL,
+    checked_at TEXT NOT NULL,
+    officer_count INTEGER NOT NULL,
+    appointed_near_event INTEGER NOT NULL,
+    resigned_near_event INTEGER NOT NULL,
+    window_days INTEGER NOT NULL,
+    UNIQUE(company_number, fhrsid)
+);
 """
 
 # Columns added to establishments_current after it was already in use in
@@ -840,6 +860,56 @@ def record_classification(
             fhrsid, authority_code, insert_collection_date, result.classification, result.confidence,
             result.reason, result.evidence_company_number, result.evidence_predecessor_fhrsid,
             result.evidence_existing_operator_fhrsid, classified_at,
+        ),
+    )
+    conn.commit()
+
+
+def get_ownership_changes_needing_officer_check(conn: sqlite3.Connection) -> list[tuple[int, str, str]]:
+    """(fhrsid, company_number, first_seen_date) for every OWNERSHIP_CHANGE
+    classification with a company cited as evidence and no existing
+    officer_churn_checks row yet. See fsa_pipeline/officer_churn.py."""
+    return conn.execute(
+        """
+        SELECT c.fhrsid, c.evidence_company_number, e.first_seen_date
+        FROM classifications c
+        JOIN establishments_current e ON e.fhrsid = c.fhrsid
+        WHERE c.classification = 'OWNERSHIP_CHANGE'
+          AND c.evidence_company_number IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM officer_churn_checks o
+              WHERE o.company_number = c.evidence_company_number AND o.fhrsid = c.fhrsid
+          )
+        """
+    ).fetchall()
+
+
+def record_officer_churn_check(
+    conn: sqlite3.Connection,
+    fhrsid: int,
+    company_number: str,
+    signal: dict,
+    window_days: int,
+    checked_at: str,
+) -> None:
+    """signal must be the return value of
+    officer_churn.compute_officer_churn_signal (aggregate-only -- see
+    that function's docstring). Never pass a raw officer list here."""
+    conn.execute(
+        """
+        INSERT INTO officer_churn_checks
+            (company_number, fhrsid, checked_at, officer_count, appointed_near_event, resigned_near_event, window_days)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(company_number, fhrsid) DO UPDATE SET
+            checked_at = excluded.checked_at,
+            officer_count = excluded.officer_count,
+            appointed_near_event = excluded.appointed_near_event,
+            resigned_near_event = excluded.resigned_near_event,
+            window_days = excluded.window_days
+        """,
+        (
+            company_number, fhrsid, checked_at, signal["officer_count"],
+            int(signal["appointed_near_event"]), int(signal["resigned_near_event"]), window_days,
         ),
     )
     conn.commit()

@@ -70,6 +70,9 @@ class Config:
     new_venue_max_incorporation_age_days: int
     address_history_fallback_threshold: float
     multi_venue_company_threshold: int
+    officer_churn_enabled: bool
+    officer_churn_window_days: int
+    officer_churn_request_delay_seconds: float
 
     @property
     def user_agent(self) -> str:
@@ -90,6 +93,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     matching = raw["matching"]
     postcode_backfill = raw["postcode_backfill"]
     classification = raw["classification"]
+    officer_churn = raw["officer_churn"]
 
     return Config(
         authorities_url=fhrs["authorities_url"],
@@ -131,4 +135,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         new_venue_max_incorporation_age_days=int(classification["new_venue_max_incorporation_age_days"]),
         address_history_fallback_threshold=float(classification["address_history_fallback_threshold"]),
         multi_venue_company_threshold=int(classification["multi_venue_company_threshold"]),
+        officer_churn_enabled=bool(officer_churn["enabled"]),
+        officer_churn_window_days=int(officer_churn["window_days"]),
+        officer_churn_request_delay_seconds=float(officer_churn["request_delay_seconds"]),
     )
