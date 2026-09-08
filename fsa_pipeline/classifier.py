@@ -255,7 +255,19 @@ def classify(
             f"\"{predecessor.business_name}\" (FHRSID {predecessor.fhrsid}), active "
             f"{predecessor.first_seen_date} to {predecessor.last_seen_date}, before this record appeared."
         )
-        if best_candidate is not None and _is_corroborating(best_candidate, config):
+        # A candidate only counts as evidence -- both in the reason text
+        # and in evidence_company_number -- when it's actually
+        # corroborating. Fixed 2026-09-09: this used to store
+        # best_candidate.company_number unconditionally whenever ANY
+        # candidate existed, even a non-corroborating one never mentioned
+        # in the reason (real case: "Breakfast Church" stored a company
+        # that scored 0.0 similarity, the closest name in that postcode
+        # district and nothing more) -- misleading for anything reading
+        # evidence_company_number, and meant a since-added officer-churn
+        # check (fsa_pipeline/officer_churn.py) would have targeted
+        # essentially random companies for 65% of OWNERSHIP_CHANGE events.
+        corroborating = best_candidate is not None and _is_corroborating(best_candidate, config)
+        if corroborating:
             reason += (
                 f" Corroborated by a Companies House match: \"{best_candidate.company_name}\" "
                 f"(similarity {best_candidate.name_similarity_score})."
@@ -266,7 +278,7 @@ def classify(
             classification="OWNERSHIP_CHANGE",
             confidence="HIGH",
             reason=reason,
-            evidence_company_number=best_candidate.company_number if best_candidate else None,
+            evidence_company_number=best_candidate.company_number if corroborating else None,
             evidence_predecessor_fhrsid=predecessor.fhrsid,
         )
 

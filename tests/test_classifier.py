@@ -253,6 +253,7 @@ def test_classify_ownership_change_takes_priority_over_company_match():
     assert "FHRSID 1" in result.reason
     assert result.evidence_predecessor_fhrsid == 1
     assert "Corroborated" in result.reason  # strong candidate mentioned too
+    assert result.evidence_company_number == candidate.company_number
 
 
 def test_classify_ownership_change_without_company_match():
@@ -561,6 +562,7 @@ def test_classify_ownership_change_not_corroborated_by_weak_unmatched_candidate(
 
     assert result.classification == "OWNERSHIP_CHANGE"
     assert "Corroborated" not in result.reason
+    assert result.evidence_company_number is None  # real bug, fixed 2026-09-09: this used to be set anyway
 
 
 # --- integration proof of the "Stage 5 design commitment" ---
