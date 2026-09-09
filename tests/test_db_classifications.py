@@ -67,3 +67,17 @@ def test_recently_incorporated_round_trips_true_false_and_none(tmp_path):
 
     rows = dict(conn.execute("SELECT fhrsid, recently_incorporated FROM classifications").fetchall())
     assert rows == {1: 1, 2: 0, 3: None}
+
+
+def test_predecessor_name_match_round_trips_true_false_and_none(tmp_path):
+    conn = db.connect(tmp_path / "t.db")
+
+    for fhrsid, value in [(1, True), (2, False), (3, None)]:
+        result = Classification(
+            classification="OPERATOR_CHANGE", confidence="MEDIUM", reason="x",
+            predecessor_name_match=value,
+        )
+        db.record_classification(conn, fhrsid, "857", "2026-08-21", result, "2026-08-21T00:00:00Z")
+
+    rows = dict(conn.execute("SELECT fhrsid, predecessor_name_match FROM classifications").fetchall())
+    assert rows == {1: 1, 2: 0, 3: None}

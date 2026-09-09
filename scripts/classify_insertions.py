@@ -14,8 +14,13 @@ FHRS establishments arrive).
 Also writes a short review-queue log (_review_queue_<date>.log next to
 the main log) listing NEW_VENUE/MEDIUM classifications from this run --
 borderline matches worth a manual look, per the user's request
-2026-08-28. Deliberately narrow (one confidence tier, one classification)
-so it stays short enough to actually check.
+2026-08-28. Deliberately narrow (one confidence tier per classification)
+so it stays short enough to actually check. Widened 2026-09-10 to also
+include OPERATOR_CHANGE/MEDIUM -- the only way that pairing occurs is a
+same-trading-name predecessor swap with no corroborating company match
+(see classifier.py's _predecessor_name_match), an equally worth-a-look
+case: genuine operator change vs. an FSA/local-authority record
+correction, which the data alone can't distinguish.
 
 Usage:
     python scripts/classify_insertions.py [--force]
@@ -174,6 +179,7 @@ def run(force: bool) -> int:
             existing_operator=existing_operator,
             config=config,
             operator_venue_count=operator_venue_count,
+            business_name=establishment["business_name"],
         )
 
         db.record_classification(conn, fhrsid, authority_code, collection_date, result, now_iso())
@@ -181,7 +187,7 @@ def run(force: bool) -> int:
         classified += 1
         counts[(result.classification, result.confidence)] += 1
 
-        if result.classification == "NEW_VENUE" and result.confidence == "MEDIUM":
+        if result.confidence == "MEDIUM" and result.classification in ("NEW_VENUE", "OPERATOR_CHANGE"):
             review_queue.append((fhrsid, establishment["business_name"], result.reason))
 
     logger.info("done: %d classified, %d already classified, %d total INSERT events", classified, already_count, len(insert_events))

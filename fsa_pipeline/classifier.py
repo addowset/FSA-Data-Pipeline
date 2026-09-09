@@ -72,6 +72,7 @@ class Classification:
     evidence_predecessor_fhrsid: int | None = None
     evidence_existing_operator_fhrsid: int | None = None
     recently_incorporated: bool | None = None
+    predecessor_name_match: bool | None = None
 
 
 def address_key(address_line_1: str | None, postcode: str | None) -> tuple[str, str] | None:
@@ -257,6 +258,26 @@ def _is_corroborating(candidate: Candidate, config: Config) -> bool:
     return candidate.address_matches_establishment and not candidate.is_high_density_address
 
 
+def _predecessor_name_match(business_name: str | None, predecessor: Predecessor) -> bool | None:
+    """True if this establishment kept the exact same trading name as its
+    departed predecessor, False if it's confirmably different, None if
+    either name is missing (genuinely unknown, not "different"). Added
+    2026-09-10: on its own a predecessor at the same address is treated
+    as OPERATOR_CHANGE regardless of whether a company match corroborates
+    it (see classify() below) -- but checked against real data first, a
+    same-name, uncorroborated predecessor swap is common (199 of 417
+    uncorroborated OPERATOR_CHANGE events, 48%) and genuinely ambiguous:
+    it could be a real change of operator that kept the trading name, or
+    the same business re-issued under a new FHRSID by the local authority
+    (the "The Cabin" case -- predecessor FHRSID had exactly one
+    observation ever, replaced within a day, both records missing
+    address_line_1). A name *change* isn't affected -- if anything that's
+    stronger turnover evidence, not weaker."""
+    if not business_name or not predecessor.business_name:
+        return None
+    return business_name.strip().upper() == predecessor.business_name.strip().upper()
+
+
 def classify(
     *,
     first_seen_date: str,
@@ -267,6 +288,7 @@ def classify(
     existing_operator: Predecessor | None,
     config: Config,
     operator_venue_count: int = 0,
+    business_name: str | None = None,
 ) -> Classification:
     if predecessor is not None:
         reason = (
@@ -293,9 +315,22 @@ def classify(
                 + (" Registered address is an exact match for this establishment's address."
                    if best_candidate.address_matches_establishment else "")
             )
+
+        name_match = _predecessor_name_match(business_name, predecessor)
+        confidence = "HIGH"
+        if name_match is True and not corroborating:
+            confidence = "MEDIUM"
+            reason += (
+                " This record kept the exact same trading name as its predecessor, and no "
+                "Companies House match corroborates a change of operator -- this could be a "
+                "genuine operator change that kept the trading name, or the same business "
+                "re-issued under a new FHRSID by the local authority. Confidence downgraded "
+                "pending review."
+            )
+
         return Classification(
             classification="OPERATOR_CHANGE",
-            confidence="HIGH",
+            confidence=confidence,
             reason=reason,
             evidence_company_number=best_candidate.company_number if corroborating else None,
             evidence_predecessor_fhrsid=predecessor.fhrsid,
@@ -303,6 +338,7 @@ def classify(
                 _incorporation_recency(best_candidate.date_of_creation, first_seen_date, config.new_venue_max_incorporation_age_days)
                 if corroborating else None
             ),
+            predecessor_name_match=name_match,
         )
 
     if best_candidate is not None and _is_corroborating(best_candidate, config):

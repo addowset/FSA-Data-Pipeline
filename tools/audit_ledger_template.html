@@ -186,7 +186,7 @@ td.addr .pc{color:var(--ink);}
       <option value="LOW">Low</option>
     </select>
     <label class="chk"><input type="checkbox" id="gtOnly"> Ground truth only</label>
-    <label class="chk"><input type="checkbox" id="reviewOnly"> Review queue (NEW_VENUE, not HIGH)</label>
+    <label class="chk"><input type="checkbox" id="reviewOnly"> Review queue (uncertain matches)</label>
     <label class="chk"><input type="checkbox" id="notedOnly"> Has your notes</label>
     <div class="count"><span class="mono" id="matchCount"></span> matching</div>
   </div>
@@ -239,12 +239,22 @@ function effectiveNote(row){
   return liveNotes[row.id] || row.gt || null;
 }
 
+// Uncertain matches worth a manual look: a NEW_VENUE that isn't full
+// confidence, or an OPERATOR_CHANGE downgraded to MEDIUM -- the only way
+// that pairing occurs is a same-trading-name predecessor swap with no
+// corroborating company match (see classifier.py's
+// _predecessor_name_match), genuinely ambiguous between a real operator
+// change and an FSA/local-authority record correction.
+function isReviewQueue(r){
+  return (r.cl==='NEW_VENUE' && r.cf!=='HIGH') || (r.cl==='OPERATOR_CHANGE' && r.cf==='MEDIUM');
+}
+
 function computeStats(){
   const c = {NEW_VENUE:0, OPERATOR_CHANGE:0, UNKNOWN:0, gt:0, review:0};
   for(const r of RAW_DATA){
     c[r.cl] = (c[r.cl]||0)+1;
     if(r.gt) c.gt++;
-    if(r.cl==='NEW_VENUE' && r.cf!=='HIGH') c.review++;
+    if(isReviewQueue(r)) c.review++;
   }
   return c;
 }
@@ -254,7 +264,7 @@ function filteredSorted(){
   if(state.classFilter) rows = rows.filter(r => r.cl === state.classFilter);
   if(state.confidence !== 'ALL') rows = rows.filter(r => r.cf === state.confidence);
   if(state.gtOnly) rows = rows.filter(r => !!r.gt);
-  if(state.reviewOnly) rows = rows.filter(r => r.cl==='NEW_VENUE' && r.cf!=='HIGH');
+  if(state.reviewOnly) rows = rows.filter(isReviewQueue);
   if(state.notedOnly) rows = rows.filter(r => !!liveNotes[r.id]);
   const q = state.search.trim().toLowerCase();
   if(q){
@@ -324,6 +334,12 @@ function recentlyIncorporatedLabel(ri){
   return {text: 'Unknown', cls: 'un'};
 }
 
+function predecessorNameMatchLabel(pm){
+  if(pm === true) return {text: 'Yes', cls: 'oc'};
+  if(pm === false) return {text: 'No', cls: 'un'};
+  return {text: 'Unknown', cls: 'un'};
+}
+
 function renderDetail(row){
   const note = liveNotes[row.id] || {};
   const seedGt = row.gt || {};
@@ -347,6 +363,7 @@ function renderDetail(row){
 
   const hasCandidates = (row.cand||[]).length > 0;
   const ri = hasCandidates ? recentlyIncorporatedLabel(row.ri) : null;
+  const pm = row.cl === 'OPERATOR_CHANGE' ? predecessorNameMatchLabel(row.pm) : null;
 
   return `
     <div class="detail-inner">
@@ -354,6 +371,7 @@ function renderDetail(row){
         <h4>Reason</h4>
         <div class="reason">${escapeHtml(row.rs)}</div>
         ${ri ? `<div style="margin-top:8px;font-size:12px;color:var(--ink-dim);">Recently incorporated: <span class="pill ${ri.cls}" style="padding:2px 8px;font-size:10px;">${ri.text}</span></div>` : ''}
+        ${pm ? `<div style="margin-top:8px;font-size:12px;color:var(--ink-dim);">Same trading name as predecessor: <span class="pill ${pm.cls}" style="padding:2px 8px;font-size:10px;">${pm.text}</span></div>` : ''}
         <h4 style="margin-top:16px;">Top candidates</h4>
         <div class="cands">${candsHtml}</div>
       </div>

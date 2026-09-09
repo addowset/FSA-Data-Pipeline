@@ -717,7 +717,7 @@ To refresh after new data lands (rerun collection/parse/diff/match/
 classify first):
 
 ```bash
-python scripts/export_audit_data.py --ground-truth ground_truth_sample_v4.csv --output audit_data.json
+python scripts/export_audit_data.py --ground-truth ground_truth_sample_v4.csv --output tools/audit_data.json
 ```
 
 Then ask Claude to splice `audit_data.json` into
@@ -1067,6 +1067,32 @@ and confirms the lookup still finds it.
   2026-08-26. A future `rebuild_db.py` replay doesn't need this special
   case: every row goes through `first_seen` on a fresh rebuild, so
   `postcode_source` is set correctly from scratch with no gap.
+- **`OPERATOR_CHANGE` confidence downgrades to `MEDIUM` when the
+  establishment kept its predecessor's exact trading name and no
+  Companies House match corroborates a new operator.** Raised by the
+  user 2026-09-10 while reviewing FHRSID 1980257 ("The Cabin") in the
+  Match Ledger: its predecessor (FHRSID 1496258) had exactly one
+  observation ever, was replaced within a day, and both records are
+  missing `address_line_1` -- reads more like a local-authority record
+  correction (same business re-issued under a new FHRSID) than a real
+  change of hands. Checked the real distribution before building
+  anything (same discipline as the incorporation-age gate above): of the
+  417 `OPERATOR_CHANGE` events with no corroborating company match, 199
+  (48%) share the predecessor's exact trading name -- not a rare edge
+  case. `_predecessor_name_match` (`fsa_pipeline/classifier.py`) records
+  this on every `OPERATOR_CHANGE` classification regardless of outcome
+  (`predecessor_name_match`, True/False/None -- None means either name
+  was missing, not "different"); it only changes the outcome
+  (`HIGH` → `MEDIUM`, with the ambiguity spelled out in the reason text)
+  when uncorroborated, since a real company match already settles who
+  the new occupant is regardless of the name coincidence. A name
+  *change* isn't touched -- that's, if anything, stronger turnover
+  evidence, not weaker. Reclassifying the full 6,367-event backlog moved
+  exactly the predicted 199 of 633 `OPERATOR_CHANGE` events from `HIGH`
+  to `MEDIUM`. The Match Ledger's review queue (previously
+  `NEW_VENUE`/not-`HIGH` only) was widened to include these, and the
+  classifier's own `_review_queue_<date>.log` likewise now includes
+  `OPERATOR_CHANGE`/`MEDIUM`.
 
 ## Data licensing
 

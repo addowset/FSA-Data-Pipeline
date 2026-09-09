@@ -60,6 +60,7 @@ def run(ground_truth_path: Path, output_path: Path) -> int:
     classifications = conn.execute(
         """
         SELECT c.fhrsid, c.authority_code, c.classification, c.confidence, c.reason, c.recently_incorporated,
+               c.predecessor_name_match,
                e.business_name, e.address_line_1, COALESCE(e.post_code, e.postcode_from_live_api),
                e.first_seen_date
         FROM classifications c
@@ -90,7 +91,7 @@ def run(ground_truth_path: Path, output_path: Path) -> int:
         })
 
     rows = []
-    for fhrsid, authority_code, classification, confidence, reason, recently_incorporated, business_name, address_line_1, postcode, first_seen_date in classifications:
+    for fhrsid, authority_code, classification, confidence, reason, recently_incorporated, predecessor_name_match, business_name, address_line_1, postcode, first_seen_date in classifications:
         row = {
             "id": fhrsid,
             "n": business_name,
@@ -102,6 +103,7 @@ def run(ground_truth_path: Path, output_path: Path) -> int:
             "cf": confidence,
             "rs": reason,
             "ri": None if recently_incorporated is None else bool(recently_incorporated),
+            "pm": None if predecessor_name_match is None else bool(predecessor_name_match),
             "cand": candidates_by_fhrsid.get(fhrsid, []),
         }
         if fhrsid in ground_truth:

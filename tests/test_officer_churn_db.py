@@ -20,6 +20,7 @@ def make_result(classification="OPERATOR_CHANGE", evidence_company_number="12345
         classification=classification, confidence="HIGH", reason="test reason",
         evidence_company_number=evidence_company_number, evidence_predecessor_fhrsid=None,
         evidence_existing_operator_fhrsid=None, recently_incorporated=None,
+        predecessor_name_match=None,
     )
 
 

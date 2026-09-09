@@ -622,6 +622,70 @@ def test_classify_operator_change_not_corroborated_by_weak_unmatched_candidate()
     assert result.evidence_company_number is None  # real bug, fixed 2026-09-09: this used to be set anyway
 
 
+# --- predecessor_name_match advisory downgrade (2026-09-10, "The Cabin" case) ---
+
+def test_classify_operator_change_downgrades_when_same_name_uncorroborated():
+    predecessor = Predecessor(fhrsid=1, business_name="The Cabin", first_seen_date="2026-08-20", last_seen_date="2026-08-20")
+
+    result = classify(
+        first_seen_date="2026-08-21", postcode="NR30 2DB", candidates_found=0, best_candidate=None,
+        predecessor=predecessor, existing_operator=None, config=make_config(),
+        business_name="The Cabin",
+    )
+
+    assert result.classification == "OPERATOR_CHANGE"
+    assert result.confidence == "MEDIUM"
+    assert result.predecessor_name_match is True
+    assert "kept the exact same trading name" in result.reason
+    assert "Confidence downgraded" in result.reason
+
+
+def test_classify_operator_change_not_downgraded_when_name_differs():
+    predecessor = Predecessor(fhrsid=1, business_name="Old Tenant", first_seen_date="2020-01-01", last_seen_date="2026-08-15")
+
+    result = classify(
+        first_seen_date="2026-08-20", postcode="NG17 3GA", candidates_found=0, best_candidate=None,
+        predecessor=predecessor, existing_operator=None, config=make_config(),
+        business_name="New Kebab House",
+    )
+
+    assert result.classification == "OPERATOR_CHANGE"
+    assert result.confidence == "HIGH"
+    assert result.predecessor_name_match is False
+    assert "Confidence downgraded" not in result.reason
+
+
+def test_classify_operator_change_not_downgraded_when_corroborated_despite_same_name():
+    predecessor = Predecessor(fhrsid=1, business_name="The Cabin", first_seen_date="2026-08-20", last_seen_date="2026-08-20")
+    candidate = make_candidate(score=1.0, date_of_creation="2026-08-01")
+
+    result = classify(
+        first_seen_date="2026-08-21", postcode="NR30 2DB", candidates_found=1, best_candidate=candidate,
+        predecessor=predecessor, existing_operator=None, config=make_config(),
+        business_name="The Cabin",
+    )
+
+    assert result.classification == "OPERATOR_CHANGE"
+    assert result.confidence == "HIGH"  # real company match trumps the name-match ambiguity
+    assert result.predecessor_name_match is True
+    assert "Confidence downgraded" not in result.reason
+
+
+def test_classify_operator_change_predecessor_name_match_none_when_business_name_not_supplied():
+    """Backward-compat guard: callers that don't pass business_name (or a
+    predecessor with no recorded name) get an unknown result, not a false
+    negative that would silently skip the downgrade."""
+    predecessor = Predecessor(fhrsid=1, business_name="Old Tenant", first_seen_date="2020-01-01", last_seen_date="2026-08-15")
+
+    result = classify(
+        first_seen_date="2026-08-20", postcode="NG17 3GA", candidates_found=0, best_candidate=None,
+        predecessor=predecessor, existing_operator=None, config=make_config(),
+    )
+
+    assert result.predecessor_name_match is None
+    assert result.confidence == "HIGH"
+
+
 # --- integration proof of the "Stage 5 design commitment" ---
 
 def test_predecessor_lookup_works_against_establishment_with_zero_field_changed_events(tmp_path):
