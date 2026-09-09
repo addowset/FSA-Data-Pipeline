@@ -1093,6 +1093,35 @@ and confirms the lookup still finds it.
   `NEW_VENUE`/not-`HIGH` only) was widened to include these, and the
   classifier's own `_review_queue_<date>.log` likewise now includes
   `OPERATOR_CHANGE`/`MEDIUM`.
+- **`predecessor_name_match` widened from byte-exact to near-exact,
+  same day, after the user spot-checked FHRSID 1761387 ("Cornelly
+  Pizza").** Its predecessor (FHRSID 1964671) traded as "CONELLY PIZZA"
+  -- a one-letter FSA/local-authority typo correction, exactly the
+  ambiguity this field exists to flag -- but exact string matching
+  missed it, because it's not byte-identical. On investigation the user
+  had also assumed the matcher should have found "CORNELLY PIZZA LTD"
+  on Companies House; it's real (SIC 56103, same street) but dissolved
+  2024-11-05, ~21 months before this FHRS event -- correctly excluded by
+  the active-only collection filter ([companies_house] "Data sources"
+  above), and wouldn't have been strong evidence of current occupancy
+  even if collected, so that filter wasn't revisited. Checked the real
+  distribution before widening: of the 218 uncorroborated
+  `OPERATOR_CHANGE` events with an exact-string name mismatch, 14 (6%)
+  are word-level differences (`&`/"and", "Ltd" suffix, stray punctuation,
+  double spaces, a corrupted apostrophe) that `name_similarity`
+  (word-overlap, already used for the address-history fallback) scores
+  >=0.9 -- most actually collapse to an exact match once both sides are
+  run through the same `normalize_company_name` used elsewhere for FHRS
+  names, since normalization already strips exactly this kind of noise.
+  11 more (5%) are a genuine typo *within* a word ("CORNELLY" vs
+  "CONELLY" share zero tokens, so word-overlap scores it 0.15 --
+  invisible to `name_similarity` no matter the threshold). Added
+  `levenshtein_distance` (`fsa_pipeline/matcher.py`) for this second
+  case -- character-level edit distance didn't exist anywhere in the
+  codebase before, gated to normalized names of length >=4 and distance
+  <=2 so it can't fire on coincidentally-close short names ("KFC" vs
+  "TFC"). Reclassifying the full backlog moved the predicted 25 more
+  events (14 + 11) from `HIGH` to `MEDIUM`: 224 of 633 total.
 
 ## Data licensing
 

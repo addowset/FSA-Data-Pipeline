@@ -52,7 +52,14 @@ import datetime as dt
 from dataclasses import dataclass
 
 from fsa_pipeline.config import Config
-from fsa_pipeline.matcher import Candidate, name_similarity, normalize_company_name
+from fsa_pipeline.matcher import (
+    Candidate,
+    EMPTY_IDF,
+    WordIdf,
+    levenshtein_distance,
+    name_similarity,
+    normalize_company_name,
+)
 
 
 @dataclass(frozen=True)
@@ -258,24 +265,58 @@ def _is_corroborating(candidate: Candidate, config: Config) -> bool:
     return candidate.address_matches_establishment and not candidate.is_high_density_address
 
 
-def _predecessor_name_match(business_name: str | None, predecessor: Predecessor) -> bool | None:
-    """True if this establishment kept the exact same trading name as its
-    departed predecessor, False if it's confirmably different, None if
-    either name is missing (genuinely unknown, not "different"). Added
-    2026-09-10: on its own a predecessor at the same address is treated
-    as OPERATOR_CHANGE regardless of whether a company match corroborates
-    it (see classify() below) -- but checked against real data first, a
-    same-name, uncorroborated predecessor swap is common (199 of 417
-    uncorroborated OPERATOR_CHANGE events, 48%) and genuinely ambiguous:
-    it could be a real change of operator that kept the trading name, or
-    the same business re-issued under a new FHRSID by the local authority
-    (the "The Cabin" case -- predecessor FHRSID had exactly one
-    observation ever, replaced within a day, both records missing
-    address_line_1). A name *change* isn't affected -- if anything that's
-    stronger turnover evidence, not weaker."""
+# Guards the edit-distance check below against coincidental low
+# distance on short names ("KFC" vs "TFC" is distance 1 but says nothing
+# about identity) -- only names with real length get the character-level
+# check; short ones still get exact-match and word-similarity.
+_NEAR_EXACT_MIN_LENGTH = 4
+_NEAR_EXACT_MAX_EDIT_DISTANCE = 2
+
+
+def _predecessor_name_match(business_name: str | None, predecessor: Predecessor, idf: WordIdf) -> bool | None:
+    """True if this establishment kept essentially the same trading name
+    as its departed predecessor, False if it's confirmably different,
+    None if either name is missing (genuinely unknown, not "different").
+    Added 2026-09-10: on its own a predecessor at the same address is
+    treated as OPERATOR_CHANGE regardless of whether a company match
+    corroborates it (see classify() below) -- but checked against real
+    data first, a same-name, uncorroborated predecessor swap is common
+    (199 of 417 uncorroborated OPERATOR_CHANGE events, 48%) and genuinely
+    ambiguous: it could be a real change of operator that kept the
+    trading name, or the same business re-issued under a new FHRSID by
+    the local authority (the "The Cabin" case -- predecessor FHRSID had
+    exactly one observation ever, replaced within a day, both records
+    missing address_line_1). A name *change* isn't affected -- if
+    anything that's stronger turnover evidence, not weaker.
+
+    Widened same day to near-exact, not byte-exact, after the user
+    flagged FHRSID 1761387 ("Cornelly Pizza"): its predecessor was
+    "CONELLY PIZZA", a one-letter FSA/LA typo correction, which the
+    original exact-string check missed entirely -- exactly the case this
+    field exists to catch. Two complementary layers, checked against real
+    data before building: (1) name_similarity (word-overlap, >=0.9) for
+    punctuation/ampersand/suffix/whitespace differences -- 14 real cases,
+    most of which actually collapse to an exact match once both sides
+    are run through normalize_company_name anyway (the same normalizer
+    already used for FHRS-name comparisons elsewhere, e.g. find_predecessor's
+    fallback path); (2) levenshtein_distance (<=2) for a typo *within* a
+    word, which word-overlap scoring can't see at all ("CORNELLY" vs
+    "CONELLY" share zero tokens, name_similarity scores it 0.15) -- 11
+    more real cases."""
     if not business_name or not predecessor.business_name:
         return None
-    return business_name.strip().upper() == predecessor.business_name.strip().upper()
+
+    a = normalize_company_name(business_name)
+    b = normalize_company_name(predecessor.business_name)
+    if not a or not b:
+        return None
+    if a == b:
+        return True
+    if name_similarity(a, b, idf) >= 0.9:
+        return True
+    if min(len(a), len(b)) >= _NEAR_EXACT_MIN_LENGTH and levenshtein_distance(a, b) <= _NEAR_EXACT_MAX_EDIT_DISTANCE:
+        return True
+    return False
 
 
 def classify(
@@ -289,6 +330,7 @@ def classify(
     config: Config,
     operator_venue_count: int = 0,
     business_name: str | None = None,
+    idf: WordIdf = EMPTY_IDF,
 ) -> Classification:
     if predecessor is not None:
         reason = (
@@ -316,12 +358,12 @@ def classify(
                    if best_candidate.address_matches_establishment else "")
             )
 
-        name_match = _predecessor_name_match(business_name, predecessor)
+        name_match = _predecessor_name_match(business_name, predecessor, idf)
         confidence = "HIGH"
         if name_match is True and not corroborating:
             confidence = "MEDIUM"
             reason += (
-                " This record kept the exact same trading name as its predecessor, and no "
+                " This record kept essentially the same trading name as its predecessor, and no "
                 "Companies House match corroborates a change of operator -- this could be a "
                 "genuine operator change that kept the trading name, or the same business "
                 "re-issued under a new FHRSID by the local authority. Confidence downgraded "

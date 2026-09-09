@@ -180,6 +180,7 @@ def run(force: bool) -> int:
             config=config,
             operator_venue_count=operator_venue_count,
             business_name=establishment["business_name"],
+            idf=idf,
         )
 
         db.record_classification(conn, fhrsid, authority_code, collection_date, result, now_iso())

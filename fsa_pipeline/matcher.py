@@ -210,6 +210,32 @@ def name_similarity(a: str, b: str, idf: WordIdf) -> float:
     return shared_weight / total_weight if total_weight else 0.0
 
 
+def levenshtein_distance(a: str, b: str) -> int:
+    """Character-level edit distance -- catches a typo *within* a word
+    (a missing/extra/substituted letter, e.g. "CORNELLY" vs "CONELLY"),
+    which name_similarity can't see at all: word-overlap scoring treats
+    two near-identical tokens that don't match exactly as zero shared
+    words, however close they are as strings (see classifier.py's
+    _predecessor_name_match, added 2026-09-10 after "Cornelly Pizza"
+    scored 0.15 on name_similarity despite being one letter off its
+    predecessor's "CONELLY PIZZA"). Classic O(len(a)*len(b)) DP; fine for
+    short business names, not intended for corpus-scale comparison."""
+    if a == b:
+        return 0
+    if not a:
+        return len(b)
+    if not b:
+        return len(a)
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, start=1):
+        cur = [i] + [0] * len(b)
+        for j, cb in enumerate(b, start=1):
+            cost = 0 if ca == cb else 1
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+        prev = cur
+    return prev[len(b)]
+
+
 @dataclass
 class Candidate:
     company_number: str

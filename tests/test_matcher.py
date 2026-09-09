@@ -7,6 +7,7 @@ from fsa_pipeline.matcher import (
     extract_operator_prefix,
     find_candidates,
     find_national_candidates,
+    levenshtein_distance,
     merge_candidates,
     name_similarity,
     normalize_company_name,
@@ -81,6 +82,29 @@ def test_name_similarity_unrelated_names_score_zero():
 def test_name_similarity_empty_strings_score_zero():
     assert name_similarity("", "SOMETHING", EMPTY_IDF) == 0.0
     assert name_similarity("SOMETHING", "", EMPTY_IDF) == 0.0
+
+
+# --- levenshtein_distance ---
+# Added 2026-09-10 for classifier.py's _predecessor_name_match, after
+# "CORNELLY PIZZA" vs "CONELLY PIZZA" (one letter apart) scored 0.15 on
+# name_similarity -- word-overlap scoring can't see a typo within a
+# single word at all, since the two spellings share zero tokens.
+
+def test_levenshtein_distance_identical_strings_is_zero():
+    assert levenshtein_distance("CORNELLY PIZZA", "CORNELLY PIZZA") == 0
+
+
+def test_levenshtein_distance_single_letter_typo():
+    assert levenshtein_distance("CORNELLY PIZZA", "CONELLY PIZZA") == 1
+
+
+def test_levenshtein_distance_against_empty_string_is_length():
+    assert levenshtein_distance("", "ABC") == 3
+    assert levenshtein_distance("ABC", "") == 3
+
+
+def test_levenshtein_distance_unrelated_strings_is_large():
+    assert levenshtein_distance("THE COB KINGS", "GREENACRE FZCO") > 2
 
 
 def make_company(number, name, address_line_1, postal_code):

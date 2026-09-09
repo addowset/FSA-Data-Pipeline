@@ -159,13 +159,17 @@ classification with a confidence grade **and a human-readable reason string**:
   already detected here, it doesn't change what triggers this category.)
   **Confidence downgraded to MEDIUM, 2026-09-10, when the predecessor
   match is uncorroborated by any Companies House match AND the new
-  record kept the exact same trading name** — 199 of 6,367 events (the
-  "The Cabin" case: a predecessor with one observation ever, replaced
-  within a day). Same-name-with-no-company-evidence can't be told apart
-  from an FSA/local-authority record correction (same business,
-  re-issued FHRSID) from data alone — see README "Design notes" for the
-  numbers. Still emitted, still `OPERATOR_CHANGE`, just not `HIGH` —
-  same "flag, don't discard" treatment as `recently_incorporated`.
+  record kept essentially the same trading name** — 224 of 6,367 events
+  (the "The Cabin" case: a predecessor with one observation ever,
+  replaced within a day). "Essentially the same" means byte-identical,
+  or near-identical after normalization — including a single-letter typo
+  correction, widened same day after "Cornelly Pizza"/"CONELLY PIZZA"
+  (one letter apart) was missed by exact matching. Same-name-with-no-
+  company-evidence can't be told apart from an FSA/local-authority
+  record correction (same business, re-issued FHRSID) from data alone —
+  see README "Design notes" for the numbers. Still emitted, still
+  `OPERATOR_CHANGE`, just not `HIGH` — same "flag, don't discard"
+  treatment as `recently_incorporated`.
 - `UNKNOWN` — no company match. Do **not** discard these: many independent
   cafés are sole traders and never incorporate. Lower confidence, still in
   the feed.

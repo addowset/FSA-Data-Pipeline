@@ -13,7 +13,7 @@ from fsa_pipeline.classifier import (
     find_predecessor,
 )
 from fsa_pipeline.config import Config
-from fsa_pipeline.matcher import EMPTY_IDF, Candidate
+from fsa_pipeline.matcher import EMPTY_IDF, Candidate, build_word_idf
 
 # find_predecessor's fallback path scores two FHRS business names against
 # each other via matcher.name_similarity (see fsa_pipeline/matcher.py's
@@ -636,7 +636,7 @@ def test_classify_operator_change_downgrades_when_same_name_uncorroborated():
     assert result.classification == "OPERATOR_CHANGE"
     assert result.confidence == "MEDIUM"
     assert result.predecessor_name_match is True
-    assert "kept the exact same trading name" in result.reason
+    assert "kept essentially the same trading name" in result.reason
     assert "Confidence downgraded" in result.reason
 
 
@@ -669,6 +669,65 @@ def test_classify_operator_change_not_downgraded_when_corroborated_despite_same_
     assert result.confidence == "HIGH"  # real company match trumps the name-match ambiguity
     assert result.predecessor_name_match is True
     assert "Confidence downgraded" not in result.reason
+
+
+def test_classify_operator_change_downgrades_via_near_exact_word_similarity():
+    """"THE MULBERRY BUSH SCHOOL" vs "MULBERRY BUSH SCHOOL" aren't
+    byte-identical after normalization (one has a leading "THE"), but
+    "THE" is common enough in this corpus to score near-zero IDF weight,
+    pushing name_similarity above the near-exact threshold -- a real
+    case from production data (2026-09-10)."""
+    idf = build_word_idf([
+        {"company_name": "The Corner Shop"}, {"company_name": "The Fish Bar"},
+        {"company_name": "The Kebab House"}, {"company_name": "Mulberry Bush School"},
+    ])
+    predecessor = Predecessor(fhrsid=1, business_name="Mulberry Bush School", first_seen_date="2020-01-01", last_seen_date="2026-08-15")
+
+    result = classify(
+        first_seen_date="2026-08-20", postcode="NG17 3GA", candidates_found=0, best_candidate=None,
+        predecessor=predecessor, existing_operator=None, config=make_config(),
+        business_name="The Mulberry Bush School", idf=idf,
+    )
+
+    assert result.classification == "OPERATOR_CHANGE"
+    assert result.confidence == "MEDIUM"
+    assert result.predecessor_name_match is True
+
+
+def test_classify_operator_change_downgrades_via_edit_distance_typo():
+    """"CONELLY PIZZA" vs "Cornelly Pizza" -- a one-letter FSA/local-
+    authority typo correction. Word-overlap name_similarity can't see
+    this at all (the two spellings share zero tokens), but
+    levenshtein_distance catches it. The real case that prompted
+    widening predecessor_name_match beyond byte-exact matching (FHRSID
+    1761387, flagged by the user 2026-09-10)."""
+    predecessor = Predecessor(fhrsid=1, business_name="CONELLY PIZZA", first_seen_date="2026-08-20", last_seen_date="2026-08-24")
+
+    result = classify(
+        first_seen_date="2026-08-25", postcode="CF33 4LB", candidates_found=0, best_candidate=None,
+        predecessor=predecessor, existing_operator=None, config=make_config(),
+        business_name="Cornelly Pizza",
+    )
+
+    assert result.classification == "OPERATOR_CHANGE"
+    assert result.confidence == "MEDIUM"
+    assert result.predecessor_name_match is True
+
+
+def test_classify_operator_change_short_names_not_matched_via_edit_distance():
+    """Guard against coincidental low edit distance on short names --
+    only normalized names of length >=4 get the character-level check;
+    "ABC" vs "ABD" (distance 1) stays a genuine mismatch."""
+    predecessor = Predecessor(fhrsid=1, business_name="ABC", first_seen_date="2020-01-01", last_seen_date="2026-08-15")
+
+    result = classify(
+        first_seen_date="2026-08-20", postcode="NG17 3GA", candidates_found=0, best_candidate=None,
+        predecessor=predecessor, existing_operator=None, config=make_config(),
+        business_name="ABD",
+    )
+
+    assert result.predecessor_name_match is False
+    assert result.confidence == "HIGH"
 
 
 def test_classify_operator_change_predecessor_name_match_none_when_business_name_not_supplied():
