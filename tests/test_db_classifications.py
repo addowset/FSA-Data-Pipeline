@@ -50,3 +50,20 @@ def test_operator_change_classification_stores_predecessor_fhrsid(tmp_path):
 
     row = conn.execute("SELECT evidence_predecessor_fhrsid FROM classifications WHERE fhrsid = 1").fetchone()
     assert row == (42,)
+
+
+def test_recently_incorporated_round_trips_true_false_and_none(tmp_path):
+    """bool|None must map to INTEGER 1/0/NULL -- int(None) would raise,
+    so this is worth its own explicit round-trip check rather than
+    trusting the other field-presence tests to catch a regression here."""
+    conn = db.connect(tmp_path / "t.db")
+
+    for fhrsid, value in [(1, True), (2, False), (3, None)]:
+        result = Classification(
+            classification="NEW_VENUE", confidence="HIGH", reason="x",
+            recently_incorporated=value,
+        )
+        db.record_classification(conn, fhrsid, "857", "2026-08-21", result, "2026-08-21T00:00:00Z")
+
+    rows = dict(conn.execute("SELECT fhrsid, recently_incorporated FROM classifications").fetchall())
+    assert rows == {1: 1, 2: 0, 3: None}

@@ -464,6 +464,58 @@ isn't reclassification, it's audit quality: the reason string now says
 of "no candidates found" or a meaningless low-score district guess. 9
 new tests, 180 total passing.
 
+**Incorporation-age gate loosened to an evidence field (2026-09-10).**
+User's proposal, testing the audit tool: an FHRS INSERT event with no
+predecessor at that address is itself real signal a supplier may want
+(a new physical location), even when the corroborating company is old
+-- rejecting it outright (the previous 180-day gate) throws that away.
+Real motivating case: "Aramark @ Drayton Manor High School" -- Aramark
+Limited, incorporated 1970, is clearly not a new *company*, but a new
+Aramark-catered school site is still a genuinely new *venue*.
+
+Checked the real numbers before changing anything (604 events were
+being suppressed by the gate): median company age 2.6 years, 18% over
+10 years old, and -- the important number -- **554 of 604 (92%) were a
+company matched to exactly one venue ever, no evidence it operates
+anywhere else.** That's the same shape as "Mamma Rosa London," the real
+case that motivated this gate in the first place (a venue that had
+traded for 18 months before its first FHRS record, confirmed "long
+running not new" by the user's own research) -- an old, single-match
+company and a genuinely new branch of an established operator are
+observationally identical in FHRS + Companies House data alone.
+
+So the gate is now advisory, not absolute, and it's the existing
+`find_existing_operator` evidence (already built for the "Soul Mama
+Stratford" case) that decides which side of the ambiguity a case falls
+on: a corroborating company that ISN'T recently incorporated still
+qualifies as `NEW_VENUE` when it's *also* confirmed to already operate
+another known FHRS venue (real multi-site evidence) -- otherwise it
+stays `UNKNOWN`, now with a clearer reason ("no evidence this company
+already operates another FHRS-registered venue") instead of a flat
+rejection. A new `recently_incorporated` field (True/False/None --
+None means the date was missing, a genuinely different claim from
+"confirmed old") is stored on every classification with a corroborating
+candidate, `OPERATOR_CHANGE` included, regardless of whether it changes
+the outcome -- pure evidence, always kept.
+
+Reclassified the full 6,367-event backlog: only **24 of the 604**
+previously-suppressed events actually flip to `NEW_VENUE` -- the
+existing `is_multi_venue_company` discount (built for the SIC-scope
+work) composed automatically with no extra code: Greggs plc (9 sites)
+and Aramark Limited (7 sites) correctly surface as `NEW_VENUE` but at
+LOW confidence (chain match, not venue-specific), while genuine smaller
+operators (Popeyes, Holroyd Howe, Bean There, Caprinos Pizza, ...) get
+full HIGH confidence with an explicit "additional site" note. The other
+580 stay `UNKNOWN` as before, just with `recently_incorporated=False`
+recorded and a clearer reason. Also fixed a real, unrelated bug found
+while touching the audit tool's export: `match_strategy="operator-prefix"`
+(added 2026-09-09) was silently collapsing into `"district"` in the
+Match Ledger's compact encoding, predating that feature -- fixed, and
+the tool now also shows `recently_incorporated` per row.
+
+4 new tests, 184 total passing. Match Ledger republished with the fix
+and the new field.
+
 Not yet built: metrics/monitoring, CSV export.
 
 Live-API collection for priority authorities (the original South West

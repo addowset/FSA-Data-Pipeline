@@ -59,13 +59,18 @@ def run(ground_truth_path: Path, output_path: Path) -> int:
 
     classifications = conn.execute(
         """
-        SELECT c.fhrsid, c.authority_code, c.classification, c.confidence, c.reason,
+        SELECT c.fhrsid, c.authority_code, c.classification, c.confidence, c.reason, c.recently_incorporated,
                e.business_name, e.address_line_1, COALESCE(e.post_code, e.postcode_from_live_api),
                e.first_seen_date
         FROM classifications c
         JOIN establishments_current e ON e.fhrsid = c.fhrsid
         """
     ).fetchall()
+
+    # "d"/"n"/"op" -- this used to be a 2-way n/d split, predating
+    # match_strategy="operator-prefix" (2026-09-09), which silently
+    # collapsed into "d" (district) until fixed here 2026-09-10.
+    strategy_codes = {"district": "d", "national": "n", "operator-prefix": "op"}
 
     candidates_by_fhrsid: dict[int, list] = {}
     for fhrsid, rank, company_name, company_number, score, strategy, high_density, date_of_creation, address_match in conn.execute(
@@ -79,13 +84,13 @@ def run(ground_truth_path: Path, output_path: Path) -> int:
     ).fetchall():
         candidates_by_fhrsid.setdefault(fhrsid, []).append({
             "n": company_name, "no": company_number, "s": score,
-            "st": "n" if strategy == "national" else "d",
+            "st": strategy_codes.get(strategy, "d"),
             "hd": bool(high_density), "am": bool(address_match),
             "dc": date_of_creation,
         })
 
     rows = []
-    for fhrsid, authority_code, classification, confidence, reason, business_name, address_line_1, postcode, first_seen_date in classifications:
+    for fhrsid, authority_code, classification, confidence, reason, recently_incorporated, business_name, address_line_1, postcode, first_seen_date in classifications:
         row = {
             "id": fhrsid,
             "n": business_name,
@@ -96,6 +101,7 @@ def run(ground_truth_path: Path, output_path: Path) -> int:
             "cl": classification,
             "cf": confidence,
             "rs": reason,
+            "ri": None if recently_incorporated is None else bool(recently_incorporated),
             "cand": candidates_by_fhrsid.get(fhrsid, []),
         }
         if fhrsid in ground_truth:

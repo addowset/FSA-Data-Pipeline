@@ -71,6 +71,7 @@ class Classification:
     evidence_company_number: str | None = None
     evidence_predecessor_fhrsid: int | None = None
     evidence_existing_operator_fhrsid: int | None = None
+    recently_incorporated: bool | None = None
 
 
 def address_key(address_line_1: str | None, postcode: str | None) -> tuple[str, str] | None:
@@ -207,19 +208,37 @@ def count_operator_venues(company_number: str, operator_index: dict) -> int:
     return len(operator_index.get(company_number, []))
 
 
-def _is_recently_incorporated(date_of_creation: str | None, first_seen_date: str, max_age_days: int) -> bool:
-    """A match only counts as NEW_VENUE-worthy evidence if the company was
-    incorporated within max_age_days of the FHRS record appearing --
-    otherwise, once Companies House collection covers full history (not
-    just a rolling window), an old established company would wrongly get
-    labelled as a new venue just for having no FHRS predecessor."""
+def _incorporation_recency(date_of_creation: str | None, first_seen_date: str, max_age_days: int) -> bool | None:
+    """True if the company was incorporated within max_age_days of the
+    FHRS record appearing, False if confirmed older (or incorporated
+    after -- also not "recent"), None if date_of_creation is missing or
+    unparseable (genuinely unknown, not the same claim as False).
+
+    Until 2026-09-10 this only existed as a boolean gate that suppressed
+    NEW_VENUE entirely for an old company -- discussed with the user,
+    who pointed out that discards real signal: "Aramark @ Drayton Manor
+    High School" (Aramark Limited, incorporated 1970) is a genuinely new
+    *venue* even though the operating company is decades old. But
+    checked against real data before removing the gate outright: of 604
+    events it was suppressing, median company age was 2.6 years, 18%
+    were 10+ years old, and 554 of 604 (92%) were a company matched to
+    exactly ONE venue ever, with zero evidence it operates anywhere
+    else -- meaning most of these are genuinely ambiguous between "an
+    established operator opening a new branch" and "a venue that's
+    traded for years and only just got its first FHRS record" (the
+    "Mamma Rosa London" case that motivated this gate originally, see
+    module docstring). The two look identical in FHRS+Companies House
+    data alone. So this is now advisory, not a hard gate: see classify()
+    for how it combines with existing-operator evidence (confirmed
+    multi-site operators, real corroborating evidence either way) to
+    decide, rather than rejecting every old-company match uniformly."""
     if not date_of_creation:
-        return False
+        return None
     try:
         created = dt.date.fromisoformat(date_of_creation)
         first_seen = dt.date.fromisoformat(first_seen_date)
     except ValueError:
-        return False
+        return None
     age_days = (first_seen - created).days
     return 0 <= age_days <= max_age_days
 
@@ -280,23 +299,47 @@ def classify(
             reason=reason,
             evidence_company_number=best_candidate.company_number if corroborating else None,
             evidence_predecessor_fhrsid=predecessor.fhrsid,
+            recently_incorporated=(
+                _incorporation_recency(best_candidate.date_of_creation, first_seen_date, config.new_venue_max_incorporation_age_days)
+                if corroborating else None
+            ),
         )
 
     if best_candidate is not None and _is_corroborating(best_candidate, config):
         score = best_candidate.name_similarity_score
+        recently_incorporated = _incorporation_recency(
+            best_candidate.date_of_creation, first_seen_date, config.new_venue_max_incorporation_age_days,
+        )
 
-        if not _is_recently_incorporated(best_candidate.date_of_creation, first_seen_date, config.new_venue_max_incorporation_age_days):
+        # A company that isn't (confirmably) recently incorporated only
+        # still counts as NEW_VENUE evidence when existing_operator
+        # confirms it already runs another known FHRS venue -- real
+        # corroborating evidence this is an established operator's new
+        # branch (the Aramark/Greggs case), not just an old company that
+        # happens to share a name. Without that corroboration, a stale
+        # single-venue match is genuinely ambiguous -- see
+        # _incorporation_recency's docstring for the real numbers behind
+        # this decision (554 of 604 previously-rejected matches had zero
+        # multi-site evidence either way).
+        qualifies_as_new_venue = recently_incorporated is True or existing_operator is not None
+        if not qualifies_as_new_venue:
             reason = (
                 f"Matched Companies House company \"{best_candidate.company_name}\" "
                 f"({best_candidate.company_number}) at similarity {score}"
                 + (" (qualified via exact registered-address match, not name similarity)" if best_candidate.address_matches_establishment else "")
-                + f", but it was incorporated {best_candidate.date_of_creation or 'at an unknown date'} -- "
-                f"not within {config.new_venue_max_incorporation_age_days} days of this record appearing, "
-                f"so not treated as new-venue evidence."
+                + f", incorporated {best_candidate.date_of_creation or 'at an unknown date'} -- "
+                + (
+                    f"not within {config.new_venue_max_incorporation_age_days} days of this record appearing"
+                    if recently_incorporated is False else "incorporation date unknown"
+                )
+                + ", and no evidence this company already operates another FHRS-registered venue -- "
+                "can't distinguish a new branch of an established operator from a venue that traded "
+                "for some time before its first FHRS registration, so not treated as new-venue evidence."
             )
             return Classification(
                 classification="UNKNOWN", confidence="LOW", reason=reason,
                 evidence_company_number=best_candidate.company_number,
+                recently_incorporated=recently_incorporated,
             )
 
         is_multi_venue_company = operator_venue_count >= config.multi_venue_company_threshold
@@ -315,7 +358,7 @@ def classify(
 
         reason = (
             f"Matched Companies House company \"{best_candidate.company_name}\" "
-            f"({best_candidate.company_number}), incorporated {best_candidate.date_of_creation}, "
+            f"({best_candidate.company_number}), incorporated {best_candidate.date_of_creation or 'at an unknown date'}, "
             f"name similarity {score}, via {best_candidate.match_strategy} search"
             + (f" in postcode district {best_candidate.postcode_district}." if best_candidate.match_strategy == "district" else ".")
         )
@@ -349,6 +392,7 @@ def classify(
             reason=reason,
             evidence_company_number=best_candidate.company_number,
             evidence_existing_operator_fhrsid=existing_operator.fhrsid if existing_operator else None,
+            recently_incorporated=recently_incorporated,
         )
 
     if postcode is None:

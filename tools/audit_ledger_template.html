@@ -314,7 +314,14 @@ function candFlags(c){
   if(c.am) flags.push('address match');
   if(c.hd) flags.push('formation agent');
   if(c.st === 'n') flags.push('national');
+  if(c.st === 'op') flags.push('operator-prefix');
   return flags;
+}
+
+function recentlyIncorporatedLabel(ri){
+  if(ri === true) return {text: 'Yes', cls: 'nv'};
+  if(ri === false) return {text: 'No', cls: 'un'};
+  return {text: 'Unknown', cls: 'un'};
 }
 
 function renderDetail(row){
@@ -338,11 +345,15 @@ function renderDetail(row){
     ? '<div class="readonly-note">Notes are read-only in this view (live editing unavailable).</div>'
     : '';
 
+  const hasCandidates = (row.cand||[]).length > 0;
+  const ri = hasCandidates ? recentlyIncorporatedLabel(row.ri) : null;
+
   return `
     <div class="detail-inner">
       <div>
         <h4>Reason</h4>
         <div class="reason">${escapeHtml(row.rs)}</div>
+        ${ri ? `<div style="margin-top:8px;font-size:12px;color:var(--ink-dim);">Recently incorporated: <span class="pill ${ri.cls}" style="padding:2px 8px;font-size:10px;">${ri.text}</span></div>` : ''}
         <h4 style="margin-top:16px;">Top candidates</h4>
         <div class="cands">${candsHtml}</div>
       </div>

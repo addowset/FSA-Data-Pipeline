@@ -378,8 +378,14 @@ def test_classify_threshold_boundary_is_inclusive():
 
 def test_classify_new_venue_rejected_when_company_too_old():
     """The Mamma Rosa case: real company, real strong name match, but
-    incorporated 18 months before the FHRS record -- not new-venue
-    evidence once collection covers full history."""
+    incorporated 18 months before the FHRS record, with no evidence it
+    operates anywhere else -- genuinely ambiguous (a new branch of an
+    established operator vs a venue that traded for a while before its
+    first FHRS record), so stays UNKNOWN. See
+    test_classify_new_venue_qualifies_via_existing_operator_despite_old_company
+    for the case that's now allowed through instead: the same old
+    company, but WITH existing-operator corroboration (the Aramark/Greggs
+    case, added 2026-09-10)."""
     candidate = make_candidate(score=1.0, date_of_creation="2025-02-19")
     result = classify(
         first_seen_date="2026-08-21", postcode="N19 3NU", candidates_found=1, best_candidate=candidate,
@@ -388,8 +394,9 @@ def test_classify_new_venue_rejected_when_company_too_old():
 
     assert result.classification == "UNKNOWN"
     assert result.confidence == "LOW"
-    assert "not within" in result.reason
+    assert "no evidence this company already operates another" in result.reason
     assert result.evidence_company_number == candidate.company_number  # evidence kept even though rejected
+    assert result.recently_incorporated is False  # confirmed old, not just unknown
 
 
 def test_classify_new_venue_accepted_at_exactly_max_age():
@@ -399,6 +406,7 @@ def test_classify_new_venue_accepted_at_exactly_max_age():
         predecessor=None, existing_operator=None, config=make_config(),
     )
     assert result.classification == "NEW_VENUE"
+    assert result.recently_incorporated is True
 
 
 def test_classify_new_venue_rejected_one_day_over_max_age():
@@ -417,6 +425,55 @@ def test_classify_new_venue_rejected_when_no_creation_date():
         predecessor=None, existing_operator=None, config=make_config(),
     )
     assert result.classification == "UNKNOWN"
+    assert result.recently_incorporated is None  # unknown, not confirmed False
+    assert "incorporation date unknown" in result.reason
+
+
+def test_classify_new_venue_qualifies_via_existing_operator_despite_old_company():
+    """The Aramark/Greggs case, added 2026-09-10: a company incorporated
+    decades ago still counts as NEW_VENUE evidence when it's confirmed to
+    already operate another FHRS-registered venue -- real corroborating
+    evidence this is an established operator's new branch, not just a
+    coincidental old-company match. User's own insight: an INSERT event
+    with no predecessor is itself signal a supplier may want, even when
+    the operating company predates the venue by decades."""
+    candidate = make_candidate(score=1.0, date_of_creation="1970-07-07")  # Aramark's real incorporation date
+    existing_operator = Predecessor(fhrsid=1, business_name="Aramark @ Some Other School", first_seen_date="2026-01-01", last_seen_date="2026-01-01")
+
+    result = classify(
+        first_seen_date="2026-08-21", postcode="N19 3NU", candidates_found=1, best_candidate=candidate,
+        predecessor=None, existing_operator=existing_operator, config=make_config(),
+    )
+
+    assert result.classification == "NEW_VENUE"
+    assert result.recently_incorporated is False
+    assert "additional site" in result.reason
+    assert result.evidence_existing_operator_fhrsid == 1
+
+
+def test_classify_operator_change_stores_recently_incorporated_when_corroborating():
+    predecessor = Predecessor(fhrsid=1, business_name="Old Tenant", first_seen_date="2020-01-01", last_seen_date="2026-08-15")
+    candidate = make_candidate(score=1.0, date_of_creation="2026-08-01")  # recent
+
+    result = classify(
+        first_seen_date="2026-08-20", postcode="NG17 3GA", candidates_found=1, best_candidate=candidate,
+        predecessor=predecessor, existing_operator=None, config=make_config(),
+    )
+
+    assert result.classification == "OPERATOR_CHANGE"
+    assert result.recently_incorporated is True
+
+
+def test_classify_operator_change_recently_incorporated_none_without_corroboration():
+    predecessor = Predecessor(fhrsid=1, business_name="Old Tenant", first_seen_date="2020-01-01", last_seen_date="2026-08-15")
+
+    result = classify(
+        first_seen_date="2026-08-20", postcode="NG17 3GA", candidates_found=0, best_candidate=None,
+        predecessor=predecessor, existing_operator=None, config=make_config(),
+    )
+
+    assert result.classification == "OPERATOR_CHANGE"
+    assert result.recently_incorporated is None
 
 
 # --- existing-operator note in NEW_VENUE reason ---

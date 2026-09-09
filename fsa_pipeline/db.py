@@ -295,6 +295,7 @@ CREATE TABLE IF NOT EXISTS classifications (
     evidence_company_number TEXT,
     evidence_predecessor_fhrsid INTEGER,
     evidence_existing_operator_fhrsid INTEGER,
+    recently_incorporated INTEGER,
     classified_at TEXT NOT NULL,
     UNIQUE(fhrsid, insert_collection_date)
 );
@@ -344,8 +345,15 @@ _COMPANY_MATCH_CANDIDATES_MIGRATIONS = {
 }
 
 # Same situation, added 2026-08-28 for the existing-operator flag.
+# recently_incorporated added 2026-09-10: whether the corroborating
+# company was incorporated within new_venue_max_incorporation_age_days
+# of the FHRS event -- NULL means unknown (no candidate, or missing
+# date_of_creation), not "confirmed old". See
+# fsa_pipeline/classifier.py's _incorporation_recency docstring for why
+# this stopped being a hard gate on NEW_VENUE.
 _CLASSIFICATIONS_MIGRATIONS = {
     "evidence_existing_operator_fhrsid": "INTEGER",
+    "recently_incorporated": "INTEGER",
 }
 
 
@@ -841,12 +849,17 @@ def record_classification(
     result,
     classified_at: str,
 ) -> None:
+    # bool|None -> INTEGER|NULL; int(None) would raise, so this can't be
+    # a bare int() call like the other evidence fields.
+    recently_incorporated = None if result.recently_incorporated is None else int(result.recently_incorporated)
+
     conn.execute(
         """
         INSERT INTO classifications
             (fhrsid, authority_code, insert_collection_date, classification, confidence, reason,
-             evidence_company_number, evidence_predecessor_fhrsid, evidence_existing_operator_fhrsid, classified_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             evidence_company_number, evidence_predecessor_fhrsid, evidence_existing_operator_fhrsid,
+             recently_incorporated, classified_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(fhrsid, insert_collection_date) DO UPDATE SET
             classification = excluded.classification,
             confidence = excluded.confidence,
@@ -854,12 +867,13 @@ def record_classification(
             evidence_company_number = excluded.evidence_company_number,
             evidence_predecessor_fhrsid = excluded.evidence_predecessor_fhrsid,
             evidence_existing_operator_fhrsid = excluded.evidence_existing_operator_fhrsid,
+            recently_incorporated = excluded.recently_incorporated,
             classified_at = excluded.classified_at
         """,
         (
             fhrsid, authority_code, insert_collection_date, result.classification, result.confidence,
             result.reason, result.evidence_company_number, result.evidence_predecessor_fhrsid,
-            result.evidence_existing_operator_fhrsid, classified_at,
+            result.evidence_existing_operator_fhrsid, recently_incorporated, classified_at,
         ),
     )
     conn.commit()
