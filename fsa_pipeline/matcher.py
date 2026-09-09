@@ -68,6 +68,20 @@ FHRS record is a far more plausible trigger than one incorporated a year
 prior (which is more likely the *previous* occupant, already captured by
 the classifier's separate FHRS-address-history predecessor check).
 
+Operator-prefix matching added 2026-09-09: FHRS names contract-catering
+arrangements as "<operator> @ <site>" (real cases: "Aramark @ Drayton
+Manor High School", "Impact Food Group @ John Cabot Academy") -- the
+site name is never part of any company's legal name and dilutes a
+full-string national match below threshold the same way a chain
+branch's location suffix does, except "@" is a deliberate, unambiguous
+FHRS delimiter here rather than a fuzzy shared-word pattern, so it's
+safe to act on directly. extract_operator_prefix splits it off;
+find_national_candidates is then called a second time on the prefix
+alone, reusing the exact same scoring/threshold/blocking -- no new
+matching logic, just a second search target. Confirmed real: 20 of 105
+"@"-pattern UNKNOWN establishments have an exact (>=0.9) match on the
+operator name once the site suffix is stripped.
+
 This module only finds and scores candidates -- it does not decide
 NEW_VENUE / OPERATOR_CHANGE / UNKNOWN. That classification is stage 5,
 which will consume this module's output (fsa_pipeline/db.py's
@@ -338,6 +352,27 @@ def find_candidates(
     return scored[:top_n]
 
 
+def extract_operator_prefix(business_name: str | None) -> str | None:
+    """FHRS establishment names for contract catering / concession
+    arrangements follow "<operator> @ <site>" (real cases: "Aramark @
+    Drayton Manor High School", "Impact Food Group @ John Cabot
+    Academy") -- the site name is never part of any company's legal
+    name and dilutes national-channel matching under the full string
+    the same way a branch's location suffix does (see
+    build_word_idf's docstring). "@" is a deliberate, unambiguous FHRS
+    convention here, not a coincidental substring -- confirmed real
+    2026-09-09: of 105 UNKNOWN establishments using this pattern, 20
+    have an exact (>=0.9) national match on the operator name alone,
+    including companies already in the pool ("Aramark Limited",
+    "Pabulum Limited", "Holroyd Howe Limited", ...). Returns the part
+    before the first "@", or None if there's no "@" or nothing before
+    it."""
+    if not business_name or "@" not in business_name:
+        return None
+    prefix = business_name.split("@", 1)[0].strip()
+    return prefix or None
+
+
 def find_national_candidates(
     business_name: str,
     companies_by_first_word: dict[str, list[dict]],
@@ -346,10 +381,15 @@ def find_national_candidates(
     threshold: float,
     idf: dict[str, float],
     top_n: int = 5,
+    strategy: str = "national",
 ) -> list[Candidate]:
     """Name-only search, independent of postcode district. See module
     docstring for why (formation-agent registrations invisible to
-    district search) and its blocking-by-first-word trade-off."""
+    district search) and its blocking-by-first-word trade-off.
+    `strategy` lets a caller searching a derived name (see
+    extract_operator_prefix) label the resulting candidates distinctly
+    from an ordinary full-name national search, for audit purposes --
+    the matching logic itself is identical either way."""
     normalized_target = normalize_company_name(business_name)
     if not normalized_target:
         return []
@@ -363,7 +403,7 @@ def find_national_candidates(
     for company in pool:
         score = name_similarity(normalized_target, normalize_company_name(company.get("company_name")), idf)
         if score >= threshold:
-            scored.append(_make_candidate(company, score, None, address_density, high_density_threshold, "national"))
+            scored.append(_make_candidate(company, score, None, address_density, high_density_threshold, strategy))
 
     scored.sort(key=lambda c: c.name_similarity_score, reverse=True)
     return scored[:top_n]

@@ -39,6 +39,7 @@ from fsa_pipeline.matcher import (
     build_companies_by_district,
     build_companies_by_first_word,
     build_word_idf,
+    extract_operator_prefix,
     find_candidates,
     find_national_candidates,
     merge_candidates,
@@ -104,7 +105,24 @@ def run(force: bool) -> int:
             business_name, companies_by_first_word, address_density,
             config.high_density_address_threshold, config.national_match_threshold, idf, config.candidates_per_match,
         )
-        candidates = merge_candidates(district_candidates, national_candidates, config.candidates_per_match, first_seen_date)
+
+        # "<operator> @ <site>" contract-catering naming (real cases:
+        # "Aramark @ Drayton Manor High School") -- the site name dilutes
+        # a full-string national match, so also search the operator name
+        # alone when present. See extract_operator_prefix's docstring.
+        operator_prefix = extract_operator_prefix(business_name)
+        operator_candidates = (
+            find_national_candidates(
+                operator_prefix, companies_by_first_word, address_density,
+                config.high_density_address_threshold, config.national_match_threshold, idf,
+                config.candidates_per_match, strategy="operator-prefix",
+            )
+            if operator_prefix else []
+        )
+
+        candidates = merge_candidates(
+            district_candidates, national_candidates + operator_candidates, config.candidates_per_match, first_seen_date,
+        )
 
         db.record_match(conn, fhrsid, authority_code, collection_date, candidates, now_iso())
 

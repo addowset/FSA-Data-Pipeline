@@ -422,6 +422,48 @@ three-number aggregate ever reached the database. 15 new tests
 (including one asserting the signal object structurally cannot carry a
 personal field), 171 total passing.
 
+**Operator-prefix matching for contract catering (2026-09-09).** User
+spotted FHRSID 1981157 ("Impact Food Group @ John Cabot Academy") while
+testing the audit tool: the real matching company ("Impact Food Group
+Limited") exists on Companies House, but the "@" separates the actual
+operator name from the site name FHRS appends -- the site name dilutes
+a full-string national match below threshold, the same class of problem
+as a branch's location suffix (see the Sourdough Sophia gap above), but
+via an unambiguous, deliberate FHRS convention (`<operator> @ <site>`)
+rather than a fuzzy shared-word pattern -- much safer to fix directly.
+This specific example turned out to have a second, compounding gap
+(Impact Food Group Limited's SIC code, `64209` "activities of other
+holding companies", is outside every code this project collects, same
+pattern as Little Dessert Shop from the SIC-scope investigation) -- but
+the general "@" pattern is real and separately worth fixing regardless.
+
+Quantified before building anything: 119 establishments nationally use
+this "@" convention (105 `UNKNOWN`, 14 already correctly
+`OPERATOR_CHANGE` via address-history regardless of company matching).
+Of the 105 `UNKNOWN`, 20 have an exact (>=0.9) national match on the
+operator name alone once the site suffix is stripped, using companies
+already in the pool -- Aramark Limited (6 sites), Pabulum Limited,
+Holroyd Howe Limited, Vacherin Limited, Thomas Franks Limited, Nourish
+Contract Catering Limited, Company of Cooks Ltd, Lunchtime Company Ltd.
+
+`extract_operator_prefix` (`fsa_pipeline/matcher.py`) splits on the
+first "@"; `find_national_candidates` gained an optional `strategy`
+label so these candidates are marked `operator-prefix` in the evidence
+table, distinct from an ordinary full-name national search, for audit
+purposes -- the matching logic itself (IDF-weighted score,
+first-word blocking, 0.9 threshold) is identical, reused as-is rather
+than inventing new scoring. Rematched + reclassified the full
+6,367-event backlog: 24 events now cite a real operator-prefix match
+(Aramark, Pabulum, Lunchtime Company, ...). Only 1 flipped
+classification (added corroboration to an already-correct
+`OPERATOR_CHANGE`) -- the other 23 correctly stay `UNKNOWN`, since these
+are long-established national caterers rejected by the existing
+180-day incorporation-recency gate, not new venues. The real win here
+isn't reclassification, it's audit quality: the reason string now says
+"matched Aramark Limited, incorporated 1970, not within 180 days" instead
+of "no candidates found" or a meaningless low-score district guess. 9
+new tests, 180 total passing.
+
 Not yet built: metrics/monitoring, CSV export.
 
 Live-API collection for priority authorities (the original South West

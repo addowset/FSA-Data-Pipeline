@@ -4,6 +4,7 @@ from fsa_pipeline.matcher import (
     build_companies_by_district,
     build_companies_by_first_word,
     build_word_idf,
+    extract_operator_prefix,
     find_candidates,
     find_national_candidates,
     merge_candidates,
@@ -249,6 +250,35 @@ def test_find_candidates_does_not_boost_high_density_address_match():
     assert all(c.is_high_density_address for c in candidates)
 
 
+# --- operator-prefix extraction ("<operator> @ <site>" contract catering) ---
+
+def test_extract_operator_prefix_splits_on_at():
+    assert extract_operator_prefix("Aramark @ Drayton Manor High School") == "Aramark"
+    assert extract_operator_prefix("Impact Food Group @ John Cabot Academy") == "Impact Food Group"
+
+
+def test_extract_operator_prefix_none_without_at():
+    assert extract_operator_prefix("The Cotswold Cafe") is None
+
+
+def test_extract_operator_prefix_none_for_none_or_empty():
+    assert extract_operator_prefix(None) is None
+    assert extract_operator_prefix("") is None
+
+
+def test_extract_operator_prefix_none_when_nothing_before_at():
+    assert extract_operator_prefix("@ Some School") is None
+    assert extract_operator_prefix("  @ Some School") is None
+
+
+def test_extract_operator_prefix_uses_first_at_only():
+    assert extract_operator_prefix("A @ B @ C") == "A"
+
+
+def test_extract_operator_prefix_strips_whitespace():
+    assert extract_operator_prefix("Aramark   @ Some School") == "Aramark"
+
+
 # --- national name-match channel (Soul Mama / Mamma Rosa case) ---
 
 def test_build_companies_by_first_word_blocks_correctly():
@@ -309,6 +339,55 @@ def test_find_national_candidates_carries_date_of_creation():
 
     candidates = find_national_candidates("Soul Mama Islington", by_first_word, density, 5, threshold=0.9, idf=idf, top_n=5)
     assert candidates[0].date_of_creation == "2026-03-19"
+
+
+def test_find_national_candidates_defaults_to_national_strategy():
+    company = make_company("1", "Soul Mama Islington Limited", "71-75 Shelton Street", "WC2H 9JQ")
+    by_first_word = build_companies_by_first_word([company])
+    density = build_address_density([company])
+    idf = build_word_idf([company])
+
+    candidates = find_national_candidates("Soul Mama Islington", by_first_word, density, 5, threshold=0.9, idf=idf, top_n=5)
+    assert candidates[0].match_strategy == "national"
+
+
+def test_find_national_candidates_accepts_custom_strategy_label():
+    """The operator-prefix search (Aramark @ School case) reuses this
+    same function but wants candidates labelled distinctly for audit
+    purposes, not lumped in with an ordinary full-name national search."""
+    company = make_company("1", "Aramark Limited", "1 Some Road", "AB1 1AA")
+    by_first_word = build_companies_by_first_word([company])
+    density = build_address_density([company])
+    idf = build_word_idf([company])
+
+    candidates = find_national_candidates(
+        "Aramark", by_first_word, density, 5, threshold=0.9, idf=idf, top_n=5, strategy="operator-prefix",
+    )
+    assert candidates[0].match_strategy == "operator-prefix"
+
+
+def test_operator_prefix_search_finds_contract_caterer_real_case():
+    """End-to-end reproduction of the real Aramark case: a full-string
+    national search on "Aramark @ Drayton Manor High School" would dilute
+    below threshold, but searching just the extracted operator prefix
+    finds the company at a perfect score."""
+    company = make_company("1", "Aramark Limited", "1 Some Road", "AB1 1AA")
+    by_first_word = build_companies_by_first_word([company])
+    density = build_address_density([company])
+    idf = build_word_idf([company])
+
+    full_name_candidates = find_national_candidates(
+        "Aramark @ Drayton Manor High School", by_first_word, density, 5, threshold=0.9, idf=idf, top_n=5,
+    )
+    assert full_name_candidates == []  # diluted below threshold by the site name
+
+    prefix = extract_operator_prefix("Aramark @ Drayton Manor High School")
+    prefix_candidates = find_national_candidates(
+        prefix, by_first_word, density, 5, threshold=0.9, idf=idf, top_n=5, strategy="operator-prefix",
+    )
+    assert len(prefix_candidates) == 1
+    assert prefix_candidates[0].company_number == "1"
+    assert prefix_candidates[0].name_similarity_score == 1.0
 
 
 # --- merging both channels ---
