@@ -11,13 +11,21 @@ without touching the raw archive.
 Replays every dated directory under raw/fhrs/ through parse_fhrs_bulk.py,
 then diff_fhrs.py, in date order; every dated directory under
 raw/companies-house/ through parse_companies_house.py; then
-match_companies_house.py, backfill_postcodes.py, and
-classify_insertions.py once each at the end, in that order (each depends
-on the fully rebuilt state from the step before, so none of these three
-can be interleaved with the per-date replay loops above). All against a
-freshly emptied database. Never touches the network -- everything here
-is a replay of what's already archived under raw/ (postcode backfill
-reuses raw/fhrs-live/<date>/ if present, same as a normal run).
+lookup_operator_companies.py, match_companies_house.py,
+backfill_postcodes.py, and classify_insertions.py once each at the end,
+in that order (each depends on the fully rebuilt state from the step
+before, so none of these can be interleaved with the per-date replay
+loops above). All against a freshly emptied database. Mostly a replay of
+what's already archived under raw/, not a re-fetch -- postcode backfill
+reuses raw/fhrs-live/<date>/ if present, same as a normal run. The
+exception is lookup_operator_companies.py: its raw responses ARE
+archived (raw/companies-house/operator-search/<date>/), but there's no
+replay-from-archive path built for them yet (unlike parse_fhrs_bulk.py/
+parse_companies_house.py), so a rebuild re-runs it live and WILL hit the
+Companies House API again for every operator prefix not already
+satisfied by the just-replayed bulk pool -- expect a live network call
+during a rebuild, both for this step and (if [officer_churn] is enabled)
+check_officer_churn.py.
 
 Usage:
     python scripts/rebuild_db.py
@@ -61,6 +69,7 @@ def main() -> None:
     conn = db.connect(config.db_path)
     conn.executescript(
         "DROP TABLE IF EXISTS officer_churn_checks;"
+        "DROP TABLE IF EXISTS operator_search_checks;"
         "DROP TABLE IF EXISTS classifications;"
         "DROP TABLE IF EXISTS company_match_candidates;"
         "DROP TABLE IF EXISTS company_match_runs;"
@@ -105,6 +114,7 @@ def main() -> None:
     if ch_dates:
         print(f"replaying {len(ch_dates)} Companies House day(s): {', '.join(ch_dates)}")
         replay_dates(python, scripts_dir, project_root, "parse_companies_house.py", ch_dates)
+        run_once("lookup_operator_companies.py")
         run_once("match_companies_house.py")
     else:
         print("no Companies House raw archive found, skipping companies/matching replay")

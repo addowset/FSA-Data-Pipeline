@@ -11,6 +11,7 @@ from fsa_pipeline.companies_house import (
     hits_from_page_bytes,
     incorporated_date_window,
     items_from_page_bytes,
+    items_from_search_page_bytes,
     parse_company_item,
 )
 
@@ -72,6 +73,35 @@ def test_parse_company_item_missing_company_number_raises():
         assert False, "expected RecordParseError"
     except RecordParseError:
         pass
+
+
+def test_parse_company_item_source_defaults_to_bulk():
+    result = parse_company_item(SAMPLE_ITEM_FULL)
+    assert result["source"] == "bulk"
+
+
+def test_parse_company_item_source_can_be_overridden():
+    """scripts/lookup_operator_companies.py reuses this parser (the
+    live profile endpoint returns the same resource shape) for a company
+    outside the normal bulk SIC scope -- see the docstring."""
+    result = parse_company_item(SAMPLE_ITEM_FULL, source="operator_search")
+    assert result["source"] == "operator_search"
+
+
+def test_items_from_search_page_bytes():
+    """/search/companies items are a different, flatter shape (title/
+    address, not company_name/registered_office_address) than Advanced
+    Search's -- this just extracts the list, same as items_from_page_bytes,
+    scoring/parsing happens downstream in the caller."""
+    page = json.dumps({
+        "items": [
+            {"company_number": "12345678", "title": "IMPACT FOOD GROUP LIMITED", "company_status": "active"},
+            {"company_number": "87654321", "title": "IMPACT FOOD BIDCO LIMITED", "company_status": "liquidation"},
+        ],
+    }).encode("utf-8")
+    items = items_from_search_page_bytes(page)
+    assert len(items) == 2
+    assert items[0]["title"] == "IMPACT FOOD GROUP LIMITED"
 
 
 def test_fingerprint_stable_for_identical_input():

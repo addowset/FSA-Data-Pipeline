@@ -50,6 +50,7 @@ def make_config(**overrides) -> Config:
         address_history_fallback_threshold=0.9,
         multi_venue_company_threshold=5,
         officer_churn_enabled=False, officer_churn_window_days=60, officer_churn_request_delay_seconds=0.0,
+        operator_search_recheck_after_days=30,
     )
     return dataclasses.replace(base, **overrides)
 

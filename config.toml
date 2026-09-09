@@ -201,6 +201,32 @@ enabled = false
 window_days = 60
 request_delay_seconds = 0.5
 
+[operator_search]
+# Targeted live lookup for "<operator> @ <site>" contract-catering names
+# (fsa_pipeline/matcher.py's extract_operator_prefix) with no qualifying
+# candidate in the bulk-collected pool -- added 2026-09-10 after the user
+# flagged FHRSID 1981157 ("Impact Food Group @ John Cabot Academy"):
+# "IMPACT FOOD GROUP LIMITED" is real, active, and a genuine match, but
+# registered under SIC 64209 ("activities of other holding companies"),
+# outside [companies_house]'s food-service SIC scope by design -- a
+# recurring pattern for contract-catering group parents, not a one-off.
+# Uses the free-text /search/companies endpoint (no SIC/status filter)
+# rather than widening bulk collection's SIC scope nationally, which
+# would mean fetching every holding company in the country for
+# near-zero per-venue signal (same reasoning as [companies_house]'s
+# active-only decision). Confirmed real scale 2026-09-10: 63 distinct
+# operator prefixes across the current UNKNOWN/OPERATOR_CHANGE pool --
+# small and bounded, trivial against the rate limit. See
+# scripts/lookup_operator_companies.py and README "Design notes".
+#
+# A prefix already checked isn't re-queried again until this many days
+# have passed (same idempotency shape as [postcode_backfill]'s
+# recheck_after_days) -- not yet calibrated against real data (how often
+# a not-found operator later incorporates, or a found one changes), so
+# this matches postcode_backfill's default as a starting point rather
+# than a measured value.
+recheck_after_days = 30
+
 [contact]
 # Used in the User-Agent header sent with every request, per FSA's request
 # for an honest, identifiable client. Not a secret.

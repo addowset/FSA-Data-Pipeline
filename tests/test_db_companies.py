@@ -1,7 +1,7 @@
 from fsa_pipeline import db
 
 
-def make_company(number, status="active", name="Test Kitchen Ltd"):
+def make_company(number, status="active", name="Test Kitchen Ltd", source="bulk"):
     return {
         "company_number": number,
         "company_name": name,
@@ -17,6 +17,7 @@ def make_company(number, status="active", name="Test Kitchen Ltd"):
         "postal_code": "BS1 1AA",
         "country": "England",
         "sic_codes": '["56101"]',
+        "source": source,
     }
 
 

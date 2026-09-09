@@ -617,6 +617,29 @@ directory as the regular run, so the two never collide. Takes roughly
 10 minutes; `rebuild_db.py` will replay it automatically afterwards
 (picked up by `parse_companies_house.py`'s glob, same as regular pages).
 
+## Running the operator lookup
+
+Part of the daily scheduled run (`run_daily.ps1`) as of 2026-09-10,
+right after Companies House parsing. To run manually:
+
+```bash
+python scripts/lookup_operator_companies.py
+```
+
+For every distinct "<operator> @ <site>" prefix (see "operator-prefix
+matching" in "Design notes") with no qualifying match already in the
+bulk-collected pool, does a targeted live `/search/companies` lookup and
+ingests a qualifying find into `companies_current` (marked
+`source='operator_search'`) so the matcher picks it up normally. Only
+multi-word prefixes are searched, and a dormant company is never
+accepted — see "Design notes" for why both gates exist; skip either at
+your peril, a first run without them produced real false positives.
+Writes to `raw/companies-house/operator-search/<today>/` and logs to
+`logs/lookup_operator_companies_<date>.log`. Idempotent per operator
+prefix (not per day) via the `operator_search_checks` table; pass
+`--force` to recheck prefixes already checked within
+`operator_search_recheck_after_days` (config.toml, default 30).
+
 ## Running the matcher
 
 After diffing and Companies House parsing, find candidate matches for
@@ -740,7 +763,8 @@ fsa_pipeline/        shared library code (config, HTTP client, FHRS + Companies 
                         parsing, archive writer, db)
 scripts/              entry-point scripts: collect_fhrs_bulk.py, parse_fhrs_bulk.py,
                         diff_fhrs.py, collect_companies_house.py, parse_companies_house.py,
-                        match_companies_house.py, backfill_postcodes.py, classify_insertions.py,
+                        lookup_operator_companies.py, match_companies_house.py,
+                        backfill_postcodes.py, classify_insertions.py,
                         rebuild_db.py, run_daily.ps1 (scheduled task entry point)
 raw/                  raw archive, gitignored — this is the asset, back it up separately
   fhrs/<date>/        one dated directory per collection run
@@ -753,6 +777,9 @@ raw/                  raw archive, gitignored — this is the asset, back it up 
     page_NNNN.json.gz            one gzip-compressed raw Advanced Search response page
     _manifest_fullhistory.json           one-time full-history backfill summary, if run
     fullhistory_<from>_<to>_page_NNNN.json.gz   one date-sliced backfill page, if run
+  companies-house/operator-search/<date>/   one dated directory per lookup_operator_companies.py run
+    <prefix>_<hash>_search.json.gz          raw /search/companies response for one operator prefix
+    <prefix>_<hash>_profile_<number>.json.gz   raw /company/<number> profile, if a candidate was checked
   fhrs-live/<date>/   one dated directory per postcode-backfill run
     <code>_page_NNNN.json.gz     one gzip-compressed raw live-API response page per authority
 logs/                 per-run logs, gitignored
@@ -1122,6 +1149,64 @@ and confirms the lookup still finds it.
   <=2 so it can't fire on coincidentally-close short names ("KFC" vs
   "TFC"). Reclassifying the full backlog moved the predicted 25 more
   events (14 + 11) from `HIGH` to `MEDIUM`: 224 of 633 total.
+- **`lookup_operator_companies.py` (2026-09-10): a targeted live
+  Companies House lookup for contract-catering group parents registered
+  outside the bulk-collected SIC scope.** Raised by the user reviewing
+  FHRSID 1981157 ("Impact Food Group @ John Cabot Academy") in the Match
+  Ledger: "IMPACT FOOD GROUP LIMITED" is real, active, incorporated
+  2022-07-26 -- but registered under SIC 64209 ("activities of other
+  holding companies"), outside `[companies_house]`'s food-service scope
+  by design, so bulk collection and the matcher's operator-prefix
+  channel (see "operator-prefix matching" above) never had a chance to
+  find it. Not a one-off: 63 distinct operator prefixes exist across the
+  current UNKNOWN/OPERATOR_CHANGE pool. Widening bulk collection's SIC
+  scope to include holding companies nationally was rejected the same
+  way `[companies_house]`'s active-only decision was -- it would mean
+  fetching every holding company in the country, every industry, for
+  near-zero per-venue signal. Instead: for just the small, bounded set
+  of operator names FHRS itself already flagged
+  (`extract_operator_prefix`'s "<operator> @ <site>" convention), a live
+  `/search/companies` lookup runs only when the bulk pool doesn't
+  already have a qualifying match, and a found company is ingested into
+  `companies_current` marked `source='operator_search'` (new column,
+  default `'bulk'` for everything else) so match_companies_house.py's
+  existing operator-prefix search finds it exactly like any other pool
+  company, no changes needed there. Every raw response is archived
+  first, same discipline as every other data source.
+
+  **A first live run immediately surfaced a real precision problem,
+  caught before it could reach any classification:** of 11 live matches,
+  at least 3 were clearly wrong -- `"Otis @ The Great Bustard"` matched
+  OTIS LIMITED (SIC 28220, lifting/handling equipment, incorporated
+  1917 -- almost certainly the elevator company), `"Kamu @ The Stapleton
+  Tavern"` matched a computer-programming company, `"Addies@The
+  edinburgh"` matched a legal-services one. Root cause:
+  `name_similarity`'s exact-match short-circuit (`if a == b: return
+  1.0`) bypasses IDF weighting entirely, so a generic single-word
+  prefix gets the same "perfect" confidence as a genuinely distinctive
+  multi-word brand name -- and unlike bulk collection, this endpoint has
+  no SIC filter to catch an unrelated industry. Two more (BUSY BEES
+  LIMITED, CHARTWELLS LIMITED -- both real brand names) carried SIC
+  `"99999"`, Companies House's own dormant-company code -- a dormant
+  shell can't be the entity actually running a venue today. All 11
+  inserted rows were rolled back before any match/classify run could
+  use them as evidence. Two gates fixed both failure modes: (1) a
+  prefix must be multi-word to be live-searched at all -- a single word
+  is simply never searched, same outcome as "not found" today, trading
+  away single-word coverage (Otis, Kamu, Addies, Chartwells, Friends)
+  entirely rather than risk it; (2) a dormant candidate is never
+  accepted even as the top score -- the next-best candidate is tried
+  instead of giving up. Rerun after the fix: same 5 genuine matches
+  (Impact Food Group, Community Sparks Change, First Steps Sports Club,
+  Sporty Zone 22, Clwb Enfys), zero false positives, Busy Bees correctly
+  fell through to "not found" once its only candidate was excluded as
+  dormant.
+
+  Wired into `run_daily.ps1` between Companies House parsing and postcode
+  backfill, and into `rebuild_db.py` -- the one caveat there: unlike
+  every other rebuild step, this one has no replay-from-archive path
+  built yet, so a rebuild re-runs it live and will hit the Companies
+  House API again (same acknowledged gap as `check_officer_churn.py`).
 
 ## Data licensing
 

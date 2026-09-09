@@ -179,7 +179,43 @@ def fetch_page(
     return content
 
 
+SEARCH_COMPANIES_URL = "https://api.company-information.service.gov.uk/search/companies"
+COMPANY_PROFILE_URL_TEMPLATE = "https://api.company-information.service.gov.uk/company/{company_number}"
 OFFICERS_URL_TEMPLATE = "https://api.company-information.service.gov.uk/company/{company_number}/officers"
+
+
+def search_companies_by_name(session: requests.Session, config: Config, query: str, items_per_page: int = 20) -> bytes:
+    """Live free-text company-name search -- a different endpoint to
+    Advanced Search (no SIC/status filter, no date-window pagination, a
+    relevance-ranked handful of results). Used by
+    scripts/lookup_operator_companies.py for a targeted, on-demand lookup
+    of a specific operator name that Advanced Search's SIC-scoped bulk
+    collection never had a chance to find (see that module's docstring).
+    Deliberately not scored/filtered here -- caller does that with the
+    same name_similarity machinery used everywhere else, since this
+    endpoint's own relevance ranking isn't something to trust blindly."""
+    params = {"q": query, "items_per_page": items_per_page}
+    response = session.get(SEARCH_COMPANIES_URL, params=params, timeout=config.ch_timeout_seconds)
+    response.raise_for_status()
+    return response.content
+
+
+def fetch_company_profile(session: requests.Session, config: Config, company_number: str) -> bytes:
+    """Full profile for one company. Same resource shape as an Advanced
+    Search result item (registered_office_address, sic_codes, etc. --
+    confirmed by direct comparison, not assumed) so parse_company_item
+    handles it unchanged; the search endpoint's own list items don't
+    carry enough detail (no sic_codes, a flattened 'address' rather than
+    'registered_office_address') to store directly."""
+    url = COMPANY_PROFILE_URL_TEMPLATE.format(company_number=company_number)
+    response = session.get(url, timeout=config.ch_timeout_seconds)
+    response.raise_for_status()
+    return response.content
+
+
+def items_from_search_page_bytes(page_bytes: bytes) -> list[dict]:
+    data = json.loads(page_bytes)
+    return data.get("items", [])
 
 
 def fetch_officers(session: requests.Session, config: Config, company_number: str) -> list[dict]:
@@ -226,15 +262,26 @@ _FINGERPRINT_FIELDS = (
 )
 
 
-def parse_company_item(item: dict) -> dict:
-    """Normalizes one Advanced Search result item to our column shape.
+def parse_company_item(item: dict, source: str = "bulk") -> dict:
+    """Normalizes one Advanced Search result item (or, with source=
+    "operator_search", a fetch_company_profile response -- same resource
+    shape) to our column shape.
 
     registered_office_address field population is documented (by
     community write-ups, not yet independently confirmed against a live
     response) as inconsistent between companies -- every address field is
     read defensively with .get(), same discipline as FHRS's sparse
     address lines.
-    """
+
+    `source` records provenance ("bulk" = the SIC+active-scoped Advanced
+    Search collection every other company comes from; "operator_search" =
+    scripts/lookup_operator_companies.py's targeted live lookup, added
+    2026-09-10 for companies -- often contract-catering group parents --
+    registered under a non-food holding-company SIC code, invisible to
+    the bulk scope by design). Stored on companies_current so a reader
+    can tell why a row exists outside the declared SIC scope, and so the
+    daily bulk top-up (which will never re-fetch these) isn't mistaken
+    for the reason they're current."""
     company_number = item.get("company_number")
     if not company_number:
         raise RecordParseError("missing company_number")
@@ -257,6 +304,7 @@ def parse_company_item(item: dict) -> dict:
         "postal_code": address.get("postal_code"),
         "country": address.get("country"),
         "sic_codes": json.dumps(sorted(sic_codes)),
+        "source": source,
     }
 
 

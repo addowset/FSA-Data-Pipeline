@@ -177,6 +177,13 @@ CREATE TABLE IF NOT EXISTS companies_current (
     postal_code TEXT,
     country TEXT,
     sic_codes TEXT,
+    -- 'bulk' (the SIC+active-scoped Advanced Search collection) or
+    -- 'operator_search' (scripts/lookup_operator_companies.py's targeted
+    -- live lookup, added 2026-09-10 -- see that module's docstring).
+    -- Marks provenance so a row outside the declared SIC scope isn't
+    -- mistaken for a bug, and so it's clear the daily bulk top-up will
+    -- never refresh it.
+    source TEXT NOT NULL DEFAULT 'bulk',
     fingerprint TEXT NOT NULL,
     first_seen_date TEXT NOT NULL,
     last_seen_date TEXT NOT NULL,
@@ -202,6 +209,7 @@ CREATE TABLE IF NOT EXISTS company_observations (
     postal_code TEXT,
     country TEXT,
     sic_codes TEXT,
+    source TEXT NOT NULL DEFAULT 'bulk',
     fingerprint TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_company_observations_company_number
@@ -322,6 +330,23 @@ CREATE TABLE IF NOT EXISTS officer_churn_checks (
     window_days INTEGER NOT NULL,
     UNIQUE(company_number, fhrsid)
 );
+
+-- Tracks live operator-name lookups (scripts/lookup_operator_companies.py),
+-- one row per distinct extracted "<operator> @ <site>" prefix, so an
+-- already-checked prefix isn't re-queried against the live API every run
+-- (same idempotency shape as postcode_backfill_events, keyed by the
+-- prefix itself rather than authority+day since an operator name isn't
+-- tied to one authority). found_company_number is NULL when the search
+-- ran but found no qualifying active company -- still worth recording,
+-- so a not-found result is skipped on the next run too, not silently
+-- retried forever.
+CREATE TABLE IF NOT EXISTS operator_search_checks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    operator_prefix TEXT NOT NULL,
+    found_company_number TEXT,
+    checked_at TEXT NOT NULL,
+    UNIQUE(operator_prefix)
+);
 """
 
 # Columns added to establishments_current after it was already in use in
@@ -353,13 +378,25 @@ _COMPANY_MATCH_CANDIDATES_MIGRATIONS = {
 # fsa_pipeline/classifier.py's _incorporation_recency docstring for why
 # this stopped being a hard gate on NEW_VENUE.
 # predecessor_name_match added 2026-09-10: whether an OPERATOR_CHANGE
-# event's establishment kept the exact same trading name as its departed
+# event's establishment kept essentially the same trading name (exact,
+# or near-exact -- see _predecessor_name_match) as its departed
 # predecessor -- NULL means either name was missing, not "different".
 # See fsa_pipeline/classifier.py's _predecessor_name_match docstring.
 _CLASSIFICATIONS_MIGRATIONS = {
     "evidence_existing_operator_fhrsid": "INTEGER",
     "recently_incorporated": "INTEGER",
     "predecessor_name_match": "INTEGER",
+}
+
+# Same situation, added 2026-09-10 for operator-search provenance -- see
+# companies_current's own column comment in SCHEMA above. Both tables
+# share ingest_companies' column list (_COMPANY_CURRENT_COLUMNS below),
+# so both need the migration.
+_COMPANIES_CURRENT_MIGRATIONS = {
+    "source": "TEXT NOT NULL DEFAULT 'bulk'",
+}
+_COMPANY_OBSERVATIONS_MIGRATIONS = {
+    "source": "TEXT NOT NULL DEFAULT 'bulk'",
 }
 
 
@@ -388,6 +425,8 @@ def connect(db_path: Path) -> sqlite3.Connection:
     _ensure_columns(conn, "establishments_current", _ESTABLISHMENTS_CURRENT_MIGRATIONS)
     _ensure_columns(conn, "company_match_candidates", _COMPANY_MATCH_CANDIDATES_MIGRATIONS)
     _ensure_columns(conn, "classifications", _CLASSIFICATIONS_MIGRATIONS)
+    _ensure_columns(conn, "companies_current", _COMPANIES_CURRENT_MIGRATIONS)
+    _ensure_columns(conn, "company_observations", _COMPANY_OBSERVATIONS_MIGRATIONS)
     return conn
 
 
@@ -567,7 +606,7 @@ _COMPANY_CURRENT_COLUMNS = (
     "company_name", "company_status", "company_subtype", "company_type",
     "date_of_creation", "date_of_cessation",
     "address_line_1", "address_line_2", "locality", "region", "postal_code", "country",
-    "sic_codes",
+    "sic_codes", "source",
 )
 
 
@@ -933,5 +972,42 @@ def record_officer_churn_check(
             company_number, fhrsid, checked_at, signal["officer_count"],
             int(signal["appointed_near_event"]), int(signal["resigned_near_event"]), window_days,
         ),
+    )
+    conn.commit()
+
+
+def already_operator_searched(conn: sqlite3.Connection, operator_prefix: str, recheck_after_days: int) -> bool:
+    """True if operator_prefix was checked recently enough not to be
+    worth a fresh live lookup -- same recheck-eligibility shape as
+    get_postcode_backfill_candidates, but keyed by the prefix itself
+    (one row per distinct operator name, not per authority+day). A
+    prefix with no row at all has never been checked, so this is always
+    False for it regardless of recheck_after_days."""
+    row = conn.execute(
+        """
+        SELECT 1 FROM operator_search_checks
+        WHERE operator_prefix = ?
+          AND julianday('now') - julianday(checked_at) < ?
+        """,
+        (operator_prefix, recheck_after_days),
+    ).fetchone()
+    return row is not None
+
+
+def record_operator_search(
+    conn: sqlite3.Connection, operator_prefix: str, found_company_number: str | None, checked_at: str,
+) -> None:
+    """found_company_number is None when the search ran but found no
+    qualifying active company -- still recorded, so a not-found result
+    is skipped (until recheck_after_days) rather than retried every run."""
+    conn.execute(
+        """
+        INSERT INTO operator_search_checks (operator_prefix, found_company_number, checked_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(operator_prefix) DO UPDATE SET
+            found_company_number = excluded.found_company_number,
+            checked_at = excluded.checked_at
+        """,
+        (operator_prefix, found_company_number, checked_at),
     )
     conn.commit()

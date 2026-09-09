@@ -73,6 +73,7 @@ class Config:
     officer_churn_enabled: bool
     officer_churn_window_days: int
     officer_churn_request_delay_seconds: float
+    operator_search_recheck_after_days: int
 
     @property
     def user_agent(self) -> str:
@@ -94,6 +95,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     postcode_backfill = raw["postcode_backfill"]
     classification = raw["classification"]
     officer_churn = raw["officer_churn"]
+    operator_search = raw["operator_search"]
 
     return Config(
         authorities_url=fhrs["authorities_url"],
@@ -138,4 +140,5 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         officer_churn_enabled=bool(officer_churn["enabled"]),
         officer_churn_window_days=int(officer_churn["window_days"]),
         officer_churn_request_delay_seconds=float(officer_churn["request_delay_seconds"]),
+        operator_search_recheck_after_days=int(operator_search["recheck_after_days"]),
     )
