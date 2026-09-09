@@ -69,7 +69,7 @@ prior (which is more likely the *previous* occupant, already captured by
 the classifier's separate FHRS-address-history predecessor check).
 
 This module only finds and scores candidates -- it does not decide
-NEW_VENUE / OWNERSHIP_CHANGE / UNKNOWN. That classification is stage 5,
+NEW_VENUE / OPERATOR_CHANGE / UNKNOWN. That classification is stage 5,
 which will consume this module's output (fsa_pipeline/db.py's
 company_match_candidates table).
 """

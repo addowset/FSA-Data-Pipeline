@@ -172,12 +172,12 @@ multi_venue_company_threshold = 5
 
 [officer_churn]
 # Opt-in, disabled by default. Discussed with the user 2026-09-08:
-# OWNERSHIP_CHANGE as built only detects venue turnover (a different FHRS
+# OPERATOR_CHANGE as built only detects venue turnover (a different FHRS
 # record previously existed at this address), not a genuine change of
 # legal control -- the brief's "no named individuals" rule means
 # Companies House officer (director) data is never fetched, so the two
 # can't be told apart. This is a narrow, deliberately-scoped exception:
-# when enabled, for every OWNERSHIP_CHANGE event with a company cited as
+# when enabled, for every OPERATOR_CHANGE event with a company cited as
 # evidence (never the whole company pool -- only companies already
 # implicated by address-history evidence), fetch that company's current
 # officer list ONCE and reduce it immediately to three numbers
@@ -193,7 +193,7 @@ multi_venue_company_threshold = 5
 # enabling in a commercial deployment. See scripts/check_officer_churn.py
 # and README "Design notes".
 enabled = false
-# How close an appointment/resignation must be to the OWNERSHIP_CHANGE
+# How close an appointment/resignation must be to the OPERATOR_CHANGE
 # event's first-seen date to count as "near" -- not yet calibrated
 # against any real data (this feature has never been enabled), matches
 # new_venue_max_incorporation_age_days's spirit of "generous, not tight"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Classifies each FHRS INSERT event as NEW_VENUE / OWNERSHIP_CHANGE / UNKNOWN.
+"""Classifies each FHRS INSERT event as NEW_VENUE / OPERATOR_CHANGE / UNKNOWN.
 
 Reads only from the database, never touches raw files or the network.
 Must run after diff_fhrs.py and match_companies_house.py for the same

@@ -216,7 +216,7 @@ const GENERATED_AT = "__GENERATED_AT__";
 
 const CLASS_META = {
   NEW_VENUE: {cls:'nv', label:'New venue'},
-  OWNERSHIP_CHANGE: {cls:'oc', label:'Ownership change'},
+  OPERATOR_CHANGE: {cls:'oc', label:'Operator change'},
   UNKNOWN: {cls:'un', label:'Unknown'},
 };
 
@@ -240,7 +240,7 @@ function effectiveNote(row){
 }
 
 function computeStats(){
-  const c = {NEW_VENUE:0, OWNERSHIP_CHANGE:0, UNKNOWN:0, gt:0, review:0};
+  const c = {NEW_VENUE:0, OPERATOR_CHANGE:0, UNKNOWN:0, gt:0, review:0};
   for(const r of RAW_DATA){
     c[r.cl] = (c[r.cl]||0)+1;
     if(r.gt) c.gt++;
@@ -282,7 +282,7 @@ function renderStats(){
   const chips = [
     {key:null, cls:'', n:RAW_DATA.length, l:'All events'},
     {key:'NEW_VENUE', cls:'nv', n:c.NEW_VENUE, l:'New venue'},
-    {key:'OWNERSHIP_CHANGE', cls:'oc', n:c.OWNERSHIP_CHANGE, l:'Ownership change'},
+    {key:'OPERATOR_CHANGE', cls:'oc', n:c.OPERATOR_CHANGE, l:'Operator change'},
     {key:'UNKNOWN', cls:'un', n:c.UNKNOWN, l:'Unknown'},
   ];
   document.getElementById('stats').innerHTML = chips.map(c2 => `

@@ -15,7 +15,7 @@ def make_est(fhrsid, name="Some Venue", post_code="NG17 3GA", first_seen="2026-0
     }
 
 
-def make_result(classification="OWNERSHIP_CHANGE", evidence_company_number="12345678"):
+def make_result(classification="OPERATOR_CHANGE", evidence_company_number="12345678"):
     return SimpleNamespace(
         classification=classification, confidence="HIGH", reason="test reason",
         evidence_company_number=evidence_company_number, evidence_predecessor_fhrsid=None,
@@ -23,16 +23,16 @@ def make_result(classification="OWNERSHIP_CHANGE", evidence_company_number="1234
     )
 
 
-def test_get_ownership_changes_needing_officer_check_finds_unchecked(tmp_path):
+def test_get_operator_changes_needing_officer_check_finds_unchecked(tmp_path):
     conn = db.connect(tmp_path / "t.db")
     db.ingest_establishments(conn, "857", "2026-08-25", [make_est(1)])
     db.record_classification(conn, 1, "857", "2026-08-25", make_result(), "2026-09-08T00:00:00Z")
 
-    targets = db.get_ownership_changes_needing_officer_check(conn)
+    targets = db.get_operator_changes_needing_officer_check(conn)
     assert targets == [(1, "12345678", "2026-08-25")]
 
 
-def test_get_ownership_changes_needing_officer_check_skips_already_checked(tmp_path):
+def test_get_operator_changes_needing_officer_check_skips_already_checked(tmp_path):
     conn = db.connect(tmp_path / "t.db")
     db.ingest_establishments(conn, "857", "2026-08-25", [make_est(1)])
     db.record_classification(conn, 1, "857", "2026-08-25", make_result(), "2026-09-08T00:00:00Z")
@@ -42,24 +42,24 @@ def test_get_ownership_changes_needing_officer_check_skips_already_checked(tmp_p
         60, "2026-09-08T00:00:00Z",
     )
 
-    targets = db.get_ownership_changes_needing_officer_check(conn)
+    targets = db.get_operator_changes_needing_officer_check(conn)
     assert targets == []
 
 
-def test_get_ownership_changes_needing_officer_check_skips_no_company_evidence(tmp_path):
+def test_get_operator_changes_needing_officer_check_skips_no_company_evidence(tmp_path):
     conn = db.connect(tmp_path / "t.db")
     db.ingest_establishments(conn, "857", "2026-08-25", [make_est(1)])
     db.record_classification(conn, 1, "857", "2026-08-25", make_result(evidence_company_number=None), "2026-09-08T00:00:00Z")
 
-    assert db.get_ownership_changes_needing_officer_check(conn) == []
+    assert db.get_operator_changes_needing_officer_check(conn) == []
 
 
-def test_get_ownership_changes_needing_officer_check_skips_non_ownership_change(tmp_path):
+def test_get_operator_changes_needing_officer_check_skips_non_operator_change(tmp_path):
     conn = db.connect(tmp_path / "t.db")
     db.ingest_establishments(conn, "857", "2026-08-25", [make_est(1)])
     db.record_classification(conn, 1, "857", "2026-08-25", make_result(classification="NEW_VENUE"), "2026-09-08T00:00:00Z")
 
-    assert db.get_ownership_changes_needing_officer_check(conn) == []
+    assert db.get_operator_changes_needing_officer_check(conn) == []
 
 
 def test_record_officer_churn_check_persists_aggregate_only(tmp_path):

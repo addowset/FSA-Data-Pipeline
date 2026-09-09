@@ -1,9 +1,9 @@
-"""Classifies each FHRS INSERT event as NEW_VENUE / OWNERSHIP_CHANGE /
+"""Classifies each FHRS INSERT event as NEW_VENUE / OPERATOR_CHANGE /
 UNKNOWN, with a confidence grade and a human-readable reason.
 
 Per the project brief:
 
-- OWNERSHIP_CHANGE: a different FHRS record previously existed at the
+- OPERATOR_CHANGE: a different FHRS record previously existed at the
   same address. Detected here by an exact address match (address_line_1
   + effective postcode, normalized) against `establishments_current` --
   the full national baseline, never `observations` -- see the "Stage 5
@@ -24,7 +24,7 @@ before this logic shipped:
    "predecessor" was still active alongside the new record, not replaced
    by it. Requiring the predecessor's last_seen_date to be strictly
    before the new establishment's first_seen_date (no temporal overlap)
-   cut this to 136 -- the actual ownership-change signal.
+   cut this to 136 -- the actual operator-change signal.
 2. The address-history match required an exact address_line_1 string on
    both sides, missing a genuine case ("Rassau Fish Bar" replaced by a
    new FHRSID also named "Rassau Fish Bar", same postcode, no overlap)
@@ -65,7 +65,7 @@ class Predecessor:
 
 @dataclass(frozen=True)
 class Classification:
-    classification: str  # 'NEW_VENUE' | 'OWNERSHIP_CHANGE' | 'UNKNOWN'
+    classification: str  # 'NEW_VENUE' | 'OPERATOR_CHANGE' | 'UNKNOWN'
     confidence: str  # 'HIGH' | 'MEDIUM' | 'LOW'
     reason: str
     evidence_company_number: str | None = None
@@ -265,7 +265,7 @@ def classify(
         # district and nothing more) -- misleading for anything reading
         # evidence_company_number, and meant a since-added officer-churn
         # check (fsa_pipeline/officer_churn.py) would have targeted
-        # essentially random companies for 65% of OWNERSHIP_CHANGE events.
+        # essentially random companies for 65% of OPERATOR_CHANGE events.
         corroborating = best_candidate is not None and _is_corroborating(best_candidate, config)
         if corroborating:
             reason += (
@@ -275,7 +275,7 @@ def classify(
                    if best_candidate.address_matches_establishment else "")
             )
         return Classification(
-            classification="OWNERSHIP_CHANGE",
+            classification="OPERATOR_CHANGE",
             confidence="HIGH",
             reason=reason,
             evidence_company_number=best_candidate.company_number if corroborating else None,

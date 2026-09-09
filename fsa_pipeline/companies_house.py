@@ -145,7 +145,7 @@ def _base_params(config: Config) -> dict:
     """sic_codes + company_status=active, shared by every query. Active-
     only decided with the user 2026-08-29: a dissolved company from
     decades ago can't plausibly be the match for a business that just
-    registered with FSA, OWNERSHIP_CHANGE detection doesn't need it
+    registered with FSA, OPERATOR_CHANGE detection doesn't need it
     either (that's entirely FHRS-side, see classifier.py), and including
     dissolved companies would have meant fetching 641,539 records instead
     of ~260,000 for no matching benefit -- pure false-positive risk for
@@ -191,7 +191,7 @@ def fetch_officers(session: requests.Session, config: Config, company_number: st
     fsa_pipeline.officer_churn.compute_officer_churn_signal and then
     discarding it -- never log it, store it, or pass it anywhere else.
     Caller must also respect config.toml's [officer_churn].enabled and
-    only call this for a company already cited as OWNERSHIP_CHANGE
+    only call this for a company already cited as OPERATOR_CHANGE
     evidence -- never for the whole company pool."""
     url = OFFICERS_URL_TEMPLATE.format(company_number=company_number)
     response = session.get(url, timeout=config.ch_timeout_seconds)

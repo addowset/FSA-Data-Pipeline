@@ -2,7 +2,7 @@
 
 A local, unattended pipeline that detects newly registered UK food and drink
 businesses from FHRS data and (eventually) classifies them as new openings
-or ownership changes, using Companies House as a corroborating signal.
+or operator changes, using Companies House as a corroborating signal.
 
 Full project brief: [CLAUDE.md](CLAUDE.md). Build proceeds in stages; see
 "Status" below for where things currently stand.
@@ -81,7 +81,7 @@ address equality). Address density (how many companies share a
 registered office) is computed and stored as evidence, not used to gate
 matching — a candidate can still be the right match at a high-density
 address, it just gets flagged so stage 5 can discount an address-based
-signal there. Doesn't decide NEW_VENUE/OWNERSHIP_CHANGE/UNKNOWN itself —
+signal there. Doesn't decide NEW_VENUE/OPERATOR_CHANGE/UNKNOWN itself —
 that's stage 5, consuming this evidence. Run against all 887 real INSERT
 events collected so far: 339 (38%) found at least one same-district
 candidate; **3 exact name matches** (e.g. "The Cotswold Cafe" ↔ "THE
@@ -119,10 +119,10 @@ see "Running the postcode backfill" for how to run it and the scheduling
 question still open.
 
 Stage 5 — classifies each FHRS INSERT event as `NEW_VENUE` /
-`OWNERSHIP_CHANGE` / `UNKNOWN` with a confidence grade and a
+`OPERATOR_CHANGE` / `UNKNOWN` with a confidence grade and a
 human-readable reason, honouring the "Stage 5 design commitment" below
 (address-history lookup queries `establishments_current`, never
-`observations`). `OWNERSHIP_CHANGE` takes priority when found: a
+`observations`). `OPERATOR_CHANGE` takes priority when found: a
 different FHRSID previously occupied the same normalized address
 (`address_line_1` + effective postcode) with **no temporal overlap** —
 the departed establishment's `last_seen_date` strictly before the new
@@ -131,7 +131,7 @@ an unfiltered address match found 316 of 1,709 real INSERT events with
 *some* other FHRSID at the same address, but many were large multi-outlet
 venues (a college campus, a community centre) where the "predecessor"
 was still active alongside the new record — requiring no overlap cut
-this to the genuine signal, **136 real ownership-change events**, e.g.
+this to the genuine signal, **136 real operator-change events**, e.g.
 "The Castle Inn" replaced by a new FHRSID also named "The Castle Inn" at
 the identical address, gone 11 days before the new one appeared.
 Otherwise, a strong Companies House match (from stage 4, thresholds
@@ -139,7 +139,7 @@ grounded in real score distribution: HIGH ≥0.85, MEDIUM ≥0.6, below
 that → `UNKNOWN`) gives `NEW_VENUE`; a match at a high-density
 (formation-agent) address gets its confidence downgraded unless the
 name match is near-exact. Run against all 1,709 real INSERT events:
-**136 OWNERSHIP_CHANGE, 8 NEW_VENUE (3 HIGH, 5 MEDIUM), 1,565 UNKNOWN**.
+**136 OPERATOR_CHANGE, 8 NEW_VENUE (3 HIGH, 5 MEDIUM), 1,565 UNKNOWN**.
 23 new tests, all passing.
 
 **Ground-truth-driven fix batch (2026-08-28/29)** — the user hand-checked
@@ -199,13 +199,13 @@ company can't be the match for something that just registered with FSA).
 Re-verified all 5 ground-truth examples after the fix + full rebuild:
 every one now resolves correctly — Soul Mama and Rassau went from
 `UNKNOWN` to correctly-matched (`NEW_VENUE`/HIGH and
-`OWNERSHIP_CHANGE`/HIGH respectively); Mamma Rosa and Breakfast Club
+`OPERATOR_CHANGE`/HIGH respectively); Mamma Rosa and Breakfast Club
 stayed `UNKNOWN` but now with real evidence explaining why (matched a
 real company, but it's years old) instead of just "no good candidate
 nearby"; Oliveira's stayed correctly unmatched despite the 260K-company
 pool, no new false positive introduced. Nationally, across all 2,966
 INSERT events accumulated so far: **200 NEW_VENUE** (151 HIGH, 40
-MEDIUM, 9 LOW, up from 8 before this fix batch), **308 OWNERSHIP_CHANGE**
+MEDIUM, 9 LOW, up from 8 before this fix batch), **308 OPERATOR_CHANGE**
 (up from 136), **2,458 UNKNOWN**. 44 new tests, 141 total passing.
 
 **Name-similarity rework (2026-09-01)** — a follow-up spot-check of the
@@ -256,15 +256,16 @@ is now correctly cited via address match instead of an unrelated Kent
 company that happened to share the new establishment's trading name. 9
 new tests, 152 total passing.
 
-Also clarified with the user what `OWNERSHIP_CHANGE` actually means here:
-it is a **venue-turnover** signal ("a new FHRS record replaced a departed
-one at this address"), not a legal-ownership signal -- the brief's
-"company-level data only, no named individuals" rule means directors and
-shareholders are never fetched, so a genuine change of legal control
-can't be distinguished from the same owner re-registering under a new
-name at the same site. The Companies House match in the reason string
-only ever corroborates the *new* occupant; it says nothing about who ran
-the old one.
+Also clarified with the user what this classification actually means
+here (still called `OWNERSHIP_CHANGE` at the time -- see the 2026-09-09
+rename below): it is a **venue-turnover** signal ("a new FHRS record
+replaced a departed one at this address"), not a legal-ownership signal
+-- the brief's "company-level data only, no named individuals" rule
+means directors and shareholders are never fetched, so a genuine change
+of legal control can't be distinguished from the same owner
+re-registering under a new name at the same site. The Companies House
+match in the reason string only ever corroborates the *new* occupant; it
+says nothing about who ran the old one.
 
 **SIC-scope investigation and the multi-venue discount (2026-09-08)** — the
 user asked which of the original brief's restrictions, if relaxed, might
@@ -314,12 +315,12 @@ venue-specific" problem the discount above exists to catch.
 Full-history recollection under the widened SIC set: 280,620 total hits
 (up from ~260,000), 19,667 newly first-seen companies. Rematch +
 reclassify of the full 5,880-event backlog: +26 events flipped from
-`UNKNOWN` to `NEW_VENUE`, `OWNERSHIP_CHANGE` unchanged (586 -- expected,
+`UNKNOWN` to `NEW_VENUE`, `OPERATOR_CHANGE` unchanged (586 -- expected,
 it's driven by FHRS address history, company match is only corroboration
 there). 148 classifications now cite a company found specifically via
 one of the 3 new codes, including genuine `NEW_VENUE`/HIGH matches
 ("Browny Africa Shop Ltd", "Dam Coffee Ltd", "Tin and Brine Ltd") and one
-`OWNERSHIP_CHANGE` ("Grain Culture Ltd", a bakery, SIC 10710).
+`OPERATOR_CHANGE` ("Grain Culture Ltd", a bakery, SIC 10710).
 
 Checked the three headline examples from the investigation individually
 rather than assuming the widening fixed them -- it fixed one of three,
@@ -382,10 +383,10 @@ name-prefix match AND a sibling company (same prefix) at the same
 registered address -- not implemented, left here as a validated,
 scoped starting point if the multi-branch-chain pattern comes up again.
 
-**Officer-churn signal for OWNERSHIP_CHANGE (2026-09-08, opt-in, off by
-default)** — the user asked to look into improving `OWNERSHIP_CHANGE`
+**Officer-churn signal for OPERATOR_CHANGE (2026-09-08, opt-in, off by
+default)** — the user asked to look into improving `OPERATOR_CHANGE`
 without the brief's GDPR-driven "no named individuals" restriction. As
-built, `OWNERSHIP_CHANGE` only detects venue turnover (a different FHRS
+built, `OPERATOR_CHANGE` only detects venue turnover (a different FHRS
 record previously existed at this address), not genuine change of legal
 control — the two look identical without director data. Real
 diagnostic check against Companies House's `/officers` endpoint (schema
@@ -407,7 +408,7 @@ even though they're present in the input. Only three numbers
 ever persisted, in a new `officer_churn_checks` table; the raw officer
 list is discarded the instant the aggregate is computed, never logged.
 `scripts/check_officer_churn.py` only ever fetches officers for a
-company already cited as `OWNERSHIP_CHANGE` evidence — never the whole
+company already cited as `OPERATOR_CHANGE` evidence — never the whole
 ~283K-company pool — keeping exposure to a few hundred companies, not
 the whole collection.
 
@@ -668,7 +669,7 @@ fsa_pipeline.db        SQLite database, gitignored (this is derived state -- reb
 
 ## Stage 5 design commitment — fulfilled
 
-**The address-history lookup for OWNERSHIP_CHANGE queries
+**The address-history lookup for OPERATOR_CHANGE queries
 `establishments_current`, never `observations`.** Raised by the user
 2026-08-27, before stage 5 existed, specifically so it couldn't get built
 the other way by accident; built 2026-08-27/28 honouring it.
@@ -829,7 +830,7 @@ and confirms the lookup still finds it.
   reusing them rather than guessing, and they still land in sensible
   places, so were kept unchanged. Reclassifying all 3,642 accumulated
   INSERT events: NEW_VENUE 236 -> 184 (more conservative, as expected once
-  generic shared words stop inflating borderline matches), OWNERSHIP_CHANGE
+  generic shared words stop inflating borderline matches), OPERATOR_CHANGE
   345 -> 344, UNKNOWN 3061 -> 3114.
   **Incident (2026-09-01):** the first implementation recomputed
   `max(idf.values())` -- a scan over the full ~105,000-word vocabulary --
@@ -866,17 +867,23 @@ and confirms the lookup still finds it.
   since that's the more plausible trigger for the FHRS record than a
   long-standing occupant already captured by the separate FHRS
   address-history predecessor check.
-- **`OWNERSHIP_CHANGE` is a venue-turnover signal, not a legal-ownership
-  signal.** It fires on "a different FHRS record previously existed at
-  this address", which says nothing about who controls the business --
+- **`OPERATOR_CHANGE` is a venue-turnover signal, not a legal-ownership
+  signal -- renamed from `OWNERSHIP_CHANGE` on 2026-09-09 for exactly
+  this reason.** It fires on "a different FHRS record previously existed
+  at this address", which says nothing about who controls the business --
   a genuine sale to a new owner and the same owner re-registering under a
-  new trading name at the same site look identical at this level. This
-  is deliberate, not a gap to fix: the brief's "company-level data only,
-  no named individuals" rule means directors/shareholders are never
-  fetched from Companies House, so legal ownership change is not
-  something this system can detect without violating its own privacy
-  constraint. The Companies House match cited in an `OWNERSHIP_CHANGE`
-  reason only ever corroborates the *new* occupant, never the old one.
+  new trading name at the same site (real case: "Favourite Grill",
+  replaced by a new company, "Cheap Grill Limited", with no actual change
+  of trading name) look identical at this level. This is deliberate, not
+  a gap to fix: the brief's "company-level data only, no named
+  individuals" rule means directors/shareholders are never fetched from
+  Companies House, so legal ownership change is not something this
+  system can detect without violating its own privacy constraint. The
+  Companies House match cited in an `OPERATOR_CHANGE` reason only ever
+  corroborates the *new* occupant, never the old one. The old name
+  claimed more than was actually known; the user caught this while
+  double-checking the officer-churn feature's logic before enabling it
+  for real (see below) and asked for the rename.
 - **Companies House Advanced Search has a hard, undocumented 10,000-result
   pagination ceiling** -- confirmed by direct testing 2026-08-29, not
   found in any documentation consulted: `start_index + size` cannot
@@ -946,7 +953,7 @@ and confirms the lookup still finds it.
   get any of this right -- keeping the two sources apart was enough.
   Downstream code should read the effective postcode as
   `COALESCE(post_code, postcode_from_live_api)` -- done for the matcher;
-  still to do for stage 5's address-history/ownership-change lookup and
+  still to do for stage 5's address-history/operator-change lookup and
   the eventual territory-filtered CSV export, both of which are equally
   postcode-dependent.
 - **New columns on an already-populated production table needed a real

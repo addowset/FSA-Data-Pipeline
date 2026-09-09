@@ -40,10 +40,10 @@ def test_record_classification_rerun_overwrites(tmp_path):
     assert row == ("NEW_VENUE",)
 
 
-def test_ownership_change_classification_stores_predecessor_fhrsid(tmp_path):
+def test_operator_change_classification_stores_predecessor_fhrsid(tmp_path):
     conn = db.connect(tmp_path / "t.db")
     result = Classification(
-        classification="OWNERSHIP_CHANGE", confidence="HIGH", reason="predecessor found",
+        classification="OPERATOR_CHANGE", confidence="HIGH", reason="predecessor found",
         evidence_predecessor_fhrsid=42,
     )
     db.record_classification(conn, 1, "857", "2026-08-21", result, "2026-08-21T00:00:00Z")

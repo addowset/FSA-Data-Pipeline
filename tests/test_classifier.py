@@ -238,7 +238,7 @@ def test_count_operator_venues_counts_all_matches_for_a_company():
 
 # --- classify ---
 
-def test_classify_ownership_change_takes_priority_over_company_match():
+def test_classify_operator_change_takes_priority_over_company_match():
     predecessor = Predecessor(fhrsid=1, business_name="Old Tenant", first_seen_date="2020-01-01", last_seen_date="2026-08-15")
     candidate = make_candidate(score=1.0)
 
@@ -247,7 +247,7 @@ def test_classify_ownership_change_takes_priority_over_company_match():
         predecessor=predecessor, existing_operator=None, config=make_config(),
     )
 
-    assert result.classification == "OWNERSHIP_CHANGE"
+    assert result.classification == "OPERATOR_CHANGE"
     assert result.confidence == "HIGH"
     assert "Old Tenant" in result.reason
     assert "FHRSID 1" in result.reason
@@ -256,7 +256,7 @@ def test_classify_ownership_change_takes_priority_over_company_match():
     assert result.evidence_company_number == candidate.company_number
 
 
-def test_classify_ownership_change_without_company_match():
+def test_classify_operator_change_without_company_match():
     predecessor = Predecessor(fhrsid=1, business_name="Old Tenant", first_seen_date="2020-01-01", last_seen_date="2026-08-15")
 
     result = classify(
@@ -264,7 +264,7 @@ def test_classify_ownership_change_without_company_match():
         predecessor=predecessor, existing_operator=None, config=make_config(),
     )
 
-    assert result.classification == "OWNERSHIP_CHANGE"
+    assert result.classification == "OPERATOR_CHANGE"
     assert result.confidence == "HIGH"
     assert "Corroborated" not in result.reason
 
@@ -532,8 +532,8 @@ def test_classify_high_density_address_match_does_not_qualify():
     assert result.classification == "UNKNOWN"
 
 
-def test_classify_ownership_change_corroborated_via_address_match():
-    """Same principle inside the OWNERSHIP_CHANGE branch: a low-scoring
+def test_classify_operator_change_corroborated_via_address_match():
+    """Same principle inside the OPERATOR_CHANGE branch: a low-scoring
     but address-matched candidate should still be cited as corroboration,
     not silently dropped for falling under the name-similarity bar."""
     predecessor = Predecessor(fhrsid=1, business_name="Hyderabadi Paradise", first_seen_date="2020-01-01", last_seen_date="2026-08-24")
@@ -544,12 +544,12 @@ def test_classify_ownership_change_corroborated_via_address_match():
         predecessor=predecessor, existing_operator=None, config=make_config(),
     )
 
-    assert result.classification == "OWNERSHIP_CHANGE"
+    assert result.classification == "OPERATOR_CHANGE"
     assert "Corroborated" in result.reason
     assert "exact match for this establishment's address" in result.reason
 
 
-def test_classify_ownership_change_not_corroborated_by_weak_unmatched_candidate():
+def test_classify_operator_change_not_corroborated_by_weak_unmatched_candidate():
     """Without an address match, a low name score stays uncorroborated --
     unchanged behaviour, guards against the new check firing too broadly."""
     predecessor = Predecessor(fhrsid=1, business_name="Old Tenant", first_seen_date="2020-01-01", last_seen_date="2026-08-15")
@@ -560,7 +560,7 @@ def test_classify_ownership_change_not_corroborated_by_weak_unmatched_candidate(
         predecessor=predecessor, existing_operator=None, config=make_config(),
     )
 
-    assert result.classification == "OWNERSHIP_CHANGE"
+    assert result.classification == "OPERATOR_CHANGE"
     assert "Corroborated" not in result.reason
     assert result.evidence_company_number is None  # real bug, fixed 2026-09-09: this used to be set anyway
 

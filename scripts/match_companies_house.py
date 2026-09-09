@@ -11,7 +11,7 @@ channels' results are merged and the ranked evidence stored in
 company_match_candidates / company_match_runs. See fsa_pipeline/matcher.py
 for the approach and its trade-offs.
 
-Does not decide NEW_VENUE / OWNERSHIP_CHANGE / UNKNOWN -- that's stage 5.
+Does not decide NEW_VENUE / OPERATOR_CHANGE / UNKNOWN -- that's stage 5.
 
 Reads only from the database, never touches raw files or the network.
 Idempotent: an INSERT event already matched is skipped. Pass --force to

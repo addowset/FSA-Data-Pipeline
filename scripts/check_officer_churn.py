@@ -1,8 +1,8 @@
 #!/usr/bin/env python
-"""Computes an officer-churn signal for OWNERSHIP_CHANGE classifications.
+"""Computes an officer-churn signal for OPERATOR_CHANGE classifications.
 
 Opt-in: exits immediately unless config.toml's [officer_churn].enabled
-is true (disabled by default). For every OWNERSHIP_CHANGE classification
+is true (disabled by default). For every OPERATOR_CHANGE classification
 with a Companies House company cited as evidence -- never the whole
 company pool -- fetches that company's current officer list and reduces
 it to three numbers (officer_count, appointed_near_event,
@@ -67,13 +67,13 @@ def run(force: bool) -> int:
             SELECT c.fhrsid, c.evidence_company_number, e.first_seen_date
             FROM classifications c
             JOIN establishments_current e ON e.fhrsid = c.fhrsid
-            WHERE c.classification = 'OWNERSHIP_CHANGE' AND c.evidence_company_number IS NOT NULL
+            WHERE c.classification = 'OPERATOR_CHANGE' AND c.evidence_company_number IS NOT NULL
             """
         ).fetchall()
     else:
-        targets = db.get_ownership_changes_needing_officer_check(conn)
+        targets = db.get_operator_changes_needing_officer_check(conn)
 
-    logger.info("%d OWNERSHIP_CHANGE event(s) to check for officer churn", len(targets))
+    logger.info("%d OPERATOR_CHANGE event(s) to check for officer churn", len(targets))
 
     checked = 0
     errors = 0
@@ -103,7 +103,7 @@ def run(force: bool) -> int:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--force", action="store_true", help="Recheck OWNERSHIP_CHANGE events already checked")
+    parser.add_argument("--force", action="store_true", help="Recheck OPERATOR_CHANGE events already checked")
     return parser.parse_args()
 
 

@@ -1,7 +1,7 @@
 # Project brief: UK new-venue signal pipeline
 
 Build a local, unattended data pipeline that detects newly registered UK food
-and drink businesses and classifies them as new openings or ownership changes.
+and drink businesses and classifies them as new openings or operator changes.
 
 I am a developer. Explain your reasoning, but don't over-explain basic Python.
 Ask me before making significant architectural choices. Work in the stages
@@ -140,10 +140,23 @@ classification with a confidence grade **and a human-readable reason string**:
 
 - `NEW_VENUE` — matched to a company incorporated recently, no prior FHRS
   record at that address.
-- `OWNERSHIP_CHANGE` — a different FHRS record previously existed at the
-  same address, or a newly incorporated company at an address with an
-  existing food business. This is potentially the most valuable signal —
-  treat it as a first-class output, not an edge case.
+- ~~`OWNERSHIP_CHANGE`~~ **renamed `OPERATOR_CHANGE`, 2026-09-09.** As
+  built, this detects venue turnover — a different FHRS record previously
+  existed at the same address, or a newly incorporated company at an
+  address with an existing food business — not a change of legal control.
+  The two aren't the same: a same-owner rebrand under a new company name
+  (real case: "Favourite Grill" replaced by "Cheap Grill Limited" at the
+  identical premises, one operator's Ltd swapped for another with no
+  actual sale) fires identically to a genuine change of ownership,
+  because this signal never looks at Companies House officer/director
+  data (see the "no named individuals" rule above) to tell them apart.
+  `OWNERSHIP_CHANGE` overclaimed what was actually known; `OPERATOR_CHANGE`
+  doesn't. Still potentially the most valuable signal — treat it as a
+  first-class output, not an edge case. (A separate, opt-in,
+  disabled-by-default officer-churn signal was later added as a narrow,
+  privacy-scoped exception to the no-named-individuals rule — see README
+  "Design notes" — but it only adds nuance to `OPERATOR_CHANGE` events
+  already detected here, it doesn't change what triggers this category.)
 - `UNKNOWN` — no company match. Do **not** discard these: many independent
   cafés are sole traders and never incorporate. Lower confidence, still in
   the feed.

@@ -17,7 +17,7 @@ stage 3's diff engine later detect an establishment that stopped appearing
 (no bump = implicit absence).
 
 This module does NOT classify changes as new-registration vs
-ownership-change vs closure -- that classification, and the bulk-reupload
+operator-change vs closure -- that classification, and the bulk-reupload
 guard, is stage 3's diff engine. This module only records what changed and
 when.
 """
@@ -307,7 +307,7 @@ CREATE INDEX IF NOT EXISTS idx_classifications_authority_date
 -- (name, date_of_birth, nationality, address, ...) -- see the module
 -- docstring for why this boundary exists before "helpfully" widening it.
 -- One row per (company_number, fhrsid) checked; only companies already
--- cited as OWNERSHIP_CHANGE evidence are ever checked, never the whole
+-- cited as OPERATOR_CHANGE evidence are ever checked, never the whole
 -- company pool.
 CREATE TABLE IF NOT EXISTS officer_churn_checks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -865,8 +865,8 @@ def record_classification(
     conn.commit()
 
 
-def get_ownership_changes_needing_officer_check(conn: sqlite3.Connection) -> list[tuple[int, str, str]]:
-    """(fhrsid, company_number, first_seen_date) for every OWNERSHIP_CHANGE
+def get_operator_changes_needing_officer_check(conn: sqlite3.Connection) -> list[tuple[int, str, str]]:
+    """(fhrsid, company_number, first_seen_date) for every OPERATOR_CHANGE
     classification with a company cited as evidence and no existing
     officer_churn_checks row yet. See fsa_pipeline/officer_churn.py."""
     return conn.execute(
@@ -874,7 +874,7 @@ def get_ownership_changes_needing_officer_check(conn: sqlite3.Connection) -> lis
         SELECT c.fhrsid, c.evidence_company_number, e.first_seen_date
         FROM classifications c
         JOIN establishments_current e ON e.fhrsid = c.fhrsid
-        WHERE c.classification = 'OWNERSHIP_CHANGE'
+        WHERE c.classification = 'OPERATOR_CHANGE'
           AND c.evidence_company_number IS NOT NULL
           AND NOT EXISTS (
               SELECT 1 FROM officer_churn_checks o

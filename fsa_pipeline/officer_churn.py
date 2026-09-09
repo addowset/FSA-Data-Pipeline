@@ -2,7 +2,7 @@
 Companies House officer list.
 
 See config.toml's [officer_churn] section for why this exists: as built,
-OWNERSHIP_CHANGE only detects venue turnover (a different FHRS record
+OPERATOR_CHANGE only detects venue turnover (a different FHRS record
 previously existed at this address), not a genuine change of legal
 control -- the two look identical without officer data, which the
 brief's "no named individuals" rule otherwise keeps this project away
@@ -27,7 +27,7 @@ import datetime as dt
 
 def compute_officer_churn_signal(officers: list[dict], event_date: str, window_days: int) -> dict:
     """officers: raw items from fetch_officers (only appointed_on/
-    resigned_on are read). event_date: the OWNERSHIP_CHANGE event's
+    resigned_on are read). event_date: the OPERATOR_CHANGE event's
     first-seen date. Returns {officer_count, appointed_near_event,
     resigned_near_event} -- aggregate only, safe to persist."""
     event = dt.date.fromisoformat(event_date)
