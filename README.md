@@ -750,6 +750,21 @@ published tool's URL is recorded in the assistant's memory, not in this
 repo (it's
 a personal, private artifact, not a build output).
 
+**"Has company match" filter, added 2026-09-10.** Confidence
+(HIGH/MEDIUM/LOW) measures whether the classification story is right --
+it says nothing about whether there's a Companies House company on
+record to actually reach the business through. Real numbers that
+prompted this: 201 of 443 `OPERATOR_CHANGE`/HIGH events (45%) have zero
+company match, while 623 `UNKNOWN`/LOW events *do* have one. The tool's
+`cn` field (`evidence_company_number`, not the same as having candidates
+in `cand` -- a candidate can exist without being corroborating enough to
+count as evidence) drives a stat chip/checkbox toggle and a per-row
+column; the matching candidate is highlighted in the detail view's
+candidate list so it's clear which one (if any) is the actual evidence.
+This is a pure filter over existing data, not a new stored field --
+`evidence_company_number` was already null exactly when there's nothing
+to sell.
+
 ## Running tests
 
 ```bash

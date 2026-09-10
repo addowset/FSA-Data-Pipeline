@@ -142,6 +142,8 @@ td.addr .pc{color:var(--ink);}
 .cand .cscore{font-family:"IBM Plex Mono";font-weight:500;white-space:nowrap;}
 .flags{display:flex;gap:4px;margin-top:4px;flex-wrap:wrap;}
 .flag{font-size:9.5px;text-transform:uppercase;letter-spacing:.03em;padding:1px 6px;border-radius:99px;background:var(--un-soft);color:var(--ink-dim);}
+.flag.evidence{background:var(--accent-soft);color:var(--accent-ink);font-weight:700;}
+.cand.evidence{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset;}
 
 .auditbox{background:var(--surface-raised);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-top:10px;}
 .auditbox .row{display:flex;gap:8px;margin-bottom:8px;align-items:center;}
@@ -188,6 +190,7 @@ td.addr .pc{color:var(--ink);}
     <label class="chk"><input type="checkbox" id="gtOnly"> Ground truth only</label>
     <label class="chk"><input type="checkbox" id="reviewOnly"> Review queue (uncertain matches)</label>
     <label class="chk"><input type="checkbox" id="notedOnly"> Has your notes</label>
+    <label class="chk"><input type="checkbox" id="hasMatchOnly"> Has company match</label>
     <div class="count"><span class="mono" id="matchCount"></span> matching</div>
   </div>
 
@@ -200,6 +203,7 @@ td.addr .pc{color:var(--ink);}
           <th>Address</th>
           <th data-sort="au">Authority</th>
           <th data-sort="cl">Classification</th>
+          <th title="Whether a Companies House company is cited as evidence -- a registered address to actually reach this business through, independent of confidence">Match</th>
           <th data-sort="fs">First seen</th>
         </tr>
       </thead>
@@ -221,7 +225,7 @@ const CLASS_META = {
 };
 
 const state = {
-  search:'', confidence:'ALL', gtOnly:false, reviewOnly:false, notedOnly:false,
+  search:'', confidence:'ALL', gtOnly:false, reviewOnly:false, notedOnly:false, hasMatchOnly:false,
   classFilter:null, sortField:'id', sortDir:'desc', page:1, pageSize:50, expanded:null,
 };
 
@@ -250,11 +254,12 @@ function isReviewQueue(r){
 }
 
 function computeStats(){
-  const c = {NEW_VENUE:0, OPERATOR_CHANGE:0, UNKNOWN:0, gt:0, review:0};
+  const c = {NEW_VENUE:0, OPERATOR_CHANGE:0, UNKNOWN:0, gt:0, review:0, hasMatch:0};
   for(const r of RAW_DATA){
     c[r.cl] = (c[r.cl]||0)+1;
     if(r.gt) c.gt++;
     if(isReviewQueue(r)) c.review++;
+    if(r.cn) c.hasMatch++;
   }
   return c;
 }
@@ -266,6 +271,7 @@ function filteredSorted(){
   if(state.gtOnly) rows = rows.filter(r => !!r.gt);
   if(state.reviewOnly) rows = rows.filter(isReviewQueue);
   if(state.notedOnly) rows = rows.filter(r => !!liveNotes[r.id]);
+  if(state.hasMatchOnly) rows = rows.filter(r => !!r.cn);
   const q = state.search.trim().toLowerCase();
   if(q){
     rows = rows.filter(r =>
@@ -301,7 +307,8 @@ function renderStats(){
       <span class="l">${c2.l}</span>
     </div>`).join('') +
     `<div class="stat ${state.gtOnly?'active':''}" id="gtChip"><span class="n">${c.gt}</span><span class="l">Ground truth</span></div>` +
-    `<div class="stat ${state.reviewOnly?'active':''}" id="reviewChip"><span class="n">${c.review}</span><span class="l">Review queue</span></div>`;
+    `<div class="stat ${state.reviewOnly?'active':''}" id="reviewChip"><span class="n">${c.review}</span><span class="l">Review queue</span></div>` +
+    `<div class="stat ${state.hasMatchOnly?'active':''}" id="hasMatchChip" title="A Companies House company cited as evidence -- a registered address to reach this business through, independent of confidence"><span class="n">${c.hasMatch}</span><span class="l">Has company match</span></div>`;
 
   document.getElementById('stats').querySelectorAll('[data-classfilter]').forEach(el => {
     el.addEventListener('click', () => {
@@ -317,10 +324,14 @@ function renderStats(){
   document.getElementById('reviewChip').addEventListener('click', () => {
     state.reviewOnly = !state.reviewOnly; state.page=1; render();
   });
+  document.getElementById('hasMatchChip').addEventListener('click', () => {
+    state.hasMatchOnly = !state.hasMatchOnly; state.page=1; render();
+  });
 }
 
-function candFlags(c){
+function candFlags(c, isEvidence){
   const flags = [];
+  if(isEvidence) flags.push('used as evidence');
   if(c.am) flags.push('address match');
   if(c.hd) flags.push('formation agent');
   if(c.st === 'n') flags.push('national');
@@ -347,15 +358,18 @@ function renderDetail(row){
   const rcn = note.rcn !== undefined ? note.rcn : (seedGt.rcn || '');
   const notesText = note.notes !== undefined ? note.notes : (seedGt.notes || '');
 
-  const candsHtml = (row.cand||[]).map(c => `
-    <div class="cand">
+  const candsHtml = (row.cand||[]).map(c => {
+    const isEvidence = !!row.cn && c.no === row.cn;
+    return `
+    <div class="cand ${isEvidence ? 'evidence' : ''}">
       <div>
         <div class="cname">${escapeHtml(c.n)}</div>
         <div class="cmeta mono">${escapeHtml(c.no)} &middot; inc. ${fmtDate(c.dc)}</div>
-        <div class="flags">${candFlags(c).map(f=>`<span class="flag">${f}</span>`).join('')}</div>
+        <div class="flags">${candFlags(c, isEvidence).map(f=>`<span class="flag ${f==='used as evidence'?'evidence':''}">${f}</span>`).join('')}</div>
       </div>
       <div class="cscore">${c.s?.toFixed ? c.s.toFixed(4) : c.s}</div>
-    </div>`).join('') || '<div class="readonly-note">No candidates found.</div>';
+    </div>`;
+  }).join('') || '<div class="readonly-note">No candidates found.</div>';
 
   const dbNote = dbAvailable === false
     ? '<div class="readonly-note">Notes are read-only in this view (live editing unavailable).</div>'
@@ -370,6 +384,7 @@ function renderDetail(row){
       <div>
         <h4>Reason</h4>
         <div class="reason">${escapeHtml(row.rs)}</div>
+        <div style="margin-top:8px;font-size:12px;color:var(--ink-dim);">Has company match (contactable via Companies House): <span class="pill ${row.cn ? 'nv' : 'un'}" style="padding:2px 8px;font-size:10px;">${row.cn ? 'Yes — ' + escapeHtml(row.cn) : 'No'}</span></div>
         ${ri ? `<div style="margin-top:8px;font-size:12px;color:var(--ink-dim);">Recently incorporated: <span class="pill ${ri.cls}" style="padding:2px 8px;font-size:10px;">${ri.text}</span></div>` : ''}
         ${pm ? `<div style="margin-top:8px;font-size:12px;color:var(--ink-dim);">Same trading name as predecessor: <span class="pill ${pm.cls}" style="padding:2px 8px;font-size:10px;">${pm.text}</span></div>` : ''}
         <h4 style="margin-top:16px;">Top candidates</h4>
@@ -411,7 +426,7 @@ function renderRows(){
 
   const tbody = document.getElementById('tbody');
   if(pageRows.length === 0){
-    tbody.innerHTML = `<tr><td colspan="6"><div class="empty">No events match these filters.</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7"><div class="empty">No events match these filters.</div></td></tr>`;
   } else {
     tbody.innerHTML = pageRows.map(row => {
       const meta = CLASS_META[row.cl] || CLASS_META.UNKNOWN;
@@ -425,9 +440,10 @@ function renderRows(){
           <td class="addr">${escapeHtml(row.a||'')}<br><span class="pc mono">${escapeHtml(row.pc||'')}</span></td>
           <td>${escapeHtml(row.au||'')}</td>
           <td><span class="pill ${meta.cls}"><span class="dot"></span>${meta.label}</span> <span class="conf ${row.cf}">${row.cf}</span></td>
+          <td>${row.cn ? '<span class="pill nv" title="'+escapeHtml(row.cn)+'"><span class="dot"></span>Yes</span>' : '<span class="pill un">No</span>'}</td>
           <td class="mono">${fmtDate(row.fs)}</td>
         </tr>
-        ${isExpanded ? `<tr class="detail"><td colspan="6">${renderDetail(row)}</td></tr>` : ''}
+        ${isExpanded ? `<tr class="detail"><td colspan="7">${renderDetail(row)}</td></tr>` : ''}
       `;
     }).join('');
   }
@@ -520,6 +536,9 @@ document.getElementById('reviewOnly').addEventListener('change', (e) => {
 });
 document.getElementById('notedOnly').addEventListener('change', (e) => {
   state.notedOnly = e.target.checked; state.page = 1; render();
+});
+document.getElementById('hasMatchOnly').addEventListener('change', (e) => {
+  state.hasMatchOnly = e.target.checked; state.page = 1; render();
 });
 document.querySelectorAll('thead th[data-sort]').forEach(th => {
   th.addEventListener('click', () => {

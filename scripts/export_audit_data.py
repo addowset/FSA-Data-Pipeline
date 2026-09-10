@@ -60,7 +60,7 @@ def run(ground_truth_path: Path, output_path: Path) -> int:
     classifications = conn.execute(
         """
         SELECT c.fhrsid, c.authority_code, c.classification, c.confidence, c.reason, c.recently_incorporated,
-               c.predecessor_name_match,
+               c.predecessor_name_match, c.evidence_company_number,
                e.business_name, e.address_line_1, COALESCE(e.post_code, e.postcode_from_live_api),
                e.first_seen_date
         FROM classifications c
@@ -91,7 +91,7 @@ def run(ground_truth_path: Path, output_path: Path) -> int:
         })
 
     rows = []
-    for fhrsid, authority_code, classification, confidence, reason, recently_incorporated, predecessor_name_match, business_name, address_line_1, postcode, first_seen_date in classifications:
+    for fhrsid, authority_code, classification, confidence, reason, recently_incorporated, predecessor_name_match, evidence_company_number, business_name, address_line_1, postcode, first_seen_date in classifications:
         row = {
             "id": fhrsid,
             "n": business_name,
@@ -104,6 +104,16 @@ def run(ground_truth_path: Path, output_path: Path) -> int:
             "rs": reason,
             "ri": None if recently_incorporated is None else bool(recently_incorporated),
             "pm": None if predecessor_name_match is None else bool(predecessor_name_match),
+            # Company number actually used as classification evidence --
+            # NOT the same as "cand" having entries. A candidate can exist
+            # (and appear in "cand") without being corroborating enough to
+            # count as evidence (see classifier.py's _is_corroborating).
+            # Presence/absence of this field is exactly "do we have a
+            # registered address to reach this business through" --
+            # commercially distinct from confidence, see README "Design
+            # notes" (2026-09-10, the OPERATOR_CHANGE/HIGH-with-no-match
+            # gap that prompted adding it here).
+            "cn": evidence_company_number,
             "cand": candidates_by_fhrsid.get(fhrsid, []),
         }
         if fhrsid in ground_truth:
