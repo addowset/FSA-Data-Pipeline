@@ -1222,6 +1222,40 @@ and confirms the lookup still finds it.
   every other rebuild step, this one has no replay-from-archive path
   built yet, so a rebuild re-runs it live and will hit the Companies
   House API again (same acknowledged gap as `check_officer_churn.py`).
+- **`normalize_postcode_district` now accepts a bare outward code, not
+  just a full postcode.** Raised by the user asking why FHRSID 1980200
+  ("Evernutra") didn't match "EVERNUTRA FOODS LTD" -- the company was
+  already correctly in the SIC-scoped pool (46370/47290, both in scope);
+  the real cause was address data, not SIC. Checked the raw archived
+  live-API response for this FHRSID directly rather than assuming: the
+  API itself returns `"PostCode": "OX7 "` -- genuinely just the district,
+  not a parsing bug on our side. `normalize_postcode_district` required a
+  full 5-7 character postcode to extract a district, so this
+  establishment (no bulk postcode at all, live-API-backfilled only) was
+  silently invisible to district-scoped matching and fell through to the
+  national channel's name-only search, which found the company fine
+  (same first word) but scored it 0.753 -- short of national search's
+  stricter 0.9 floor (justified there by the lack of geographic
+  corroboration a district match would have provided). Checked the real
+  scale before fixing: **95,057 establishments nationally** rely solely
+  on this live-API postcode field, and virtually all of them (95,057 of
+  95,058) are in this same bare-district-only form -- not a one-off.
+  Fixed by falling back to treating the cleaned input as an
+  already-bare outward code (a short regex, `^[A-Z]{1,2}[0-9][A-Z0-9]?$`)
+  when it's too short to contain an inward code --
+  `companies_by_district` is already keyed by the same normalized
+  string (extracted from companies' full postal codes), so no other
+  matching code needed to change. Rematching and reclassifying the full
+  backlog: **2,057 establishments** gained a district-search candidate
+  they didn't have before, of which 86 moved to a real classification
+  outcome with evidence (78 `NEW_VENUE`/HIGH, 7 `NEW_VENUE`/MEDIUM, 1
+  `OPERATOR_CHANGE`/HIGH, 12 `OPERATOR_CHANGE`/MEDIUM) and 111 more
+  stayed `UNKNOWN` but now carry real company-match evidence (see "has
+  company match" above) even though classification confidence stays
+  low, typically due to the incorporation-age gate -- FHRSID 1980200
+  itself lands here: Evernutra Foods Ltd found and cited as evidence,
+  incorporated too long before this record to count as a confirmed new
+  venue, but no longer commercially blank.
 
 ## Data licensing
 

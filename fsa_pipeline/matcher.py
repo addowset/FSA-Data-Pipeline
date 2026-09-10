@@ -99,6 +99,12 @@ _LEGAL_SUFFIXES = {
     "LIMITED", "LTD", "LLP", "PLC", "CIC", "LP", "UNLIMITED",
 }
 
+# A bare UK outward code on its own (1-2 letters, a digit, optionally one
+# more letter/digit -- "OX7", "S43", "RH20", "SW1A"). Used as a fallback
+# in normalize_postcode_district below when the input is too short to be
+# a full postcode -- see that function's docstring for why this exists.
+_OUTWARD_CODE_RE = re.compile(r"^[A-Z]{1,2}[0-9][A-Z0-9]?$")
+
 
 def normalize_postcode_district(postcode: str | None) -> str | None:
     """Extracts the postcode district (outward code) from a UK postcode,
@@ -108,21 +114,34 @@ def normalize_postcode_district(postcode: str | None) -> str | None:
     UK postcodes always end in a 3-character inward code (a digit then
     two letters) -- stripping that off the whitespace-normalized postcode
     gives the outward code regardless of how the input was spaced.
+
+    Falls back to treating the whole cleaned input as an already-bare
+    outward code when it's too short to contain an inward code. Added
+    2026-09-10, confirmed real: the live-API postcode backfill's source
+    field is sometimes genuinely just the district ("OX7 ", confirmed by
+    inspecting the raw archived response for FHRSID 1980200 -- not a
+    parsing bug), and this was silently invisible to district-scoped
+    matching for the ~95,000 establishments nationally that rely solely
+    on that field -- we already know the district, this just lets the
+    matcher use it instead of requiring a full postcode we'll never get.
     """
     if not postcode:
         return None
 
     cleaned = postcode.strip().upper().replace(" ", "")
-    if not (5 <= len(cleaned) <= 7):
+    if not cleaned:
         return None
 
-    outward, inward = cleaned[:-3], cleaned[-3:]
-    if not outward or not outward[0].isalpha():
-        return None
-    if not (inward[0].isdigit() and inward[1].isalpha() and inward[2].isalpha()):
+    if 5 <= len(cleaned) <= 7:
+        outward, inward = cleaned[:-3], cleaned[-3:]
+        if outward and outward[0].isalpha() and inward[0].isdigit() and inward[1].isalpha() and inward[2].isalpha():
+            return outward
         return None
 
-    return outward
+    if _OUTWARD_CODE_RE.match(cleaned):
+        return cleaned
+
+    return None
 
 
 def normalize_company_name(name: str | None) -> str:

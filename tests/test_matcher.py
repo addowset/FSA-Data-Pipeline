@@ -30,6 +30,36 @@ def test_normalize_postcode_district_rejects_junk():
     assert normalize_postcode_district("12345") is None
 
 
+# --- normalize_postcode_district: bare outward code fallback ---
+# Added 2026-09-10 after the user flagged FHRSID 1980200 ("Evernutra"):
+# the live-API postcode backfill's source field is sometimes genuinely
+# just the district ("OX7 ", confirmed against the raw archived
+# response, not a parsing bug) -- ~95,000 establishments nationally rely
+# solely on this field and were silently invisible to district-scoped
+# matching as a result.
+
+def test_normalize_postcode_district_accepts_bare_outward_code():
+    assert normalize_postcode_district("OX7") == "OX7"
+    assert normalize_postcode_district("OX7 ") == "OX7"  # real value, trailing space
+    assert normalize_postcode_district("s43") == "S43"
+    assert normalize_postcode_district("RH20") == "RH20"
+    assert normalize_postcode_district("SW1A") == "SW1A"
+
+
+def test_normalize_postcode_district_bare_outward_code_still_rejects_junk():
+    assert normalize_postcode_district("12") is None
+    assert normalize_postcode_district("TOOLONG1") is None
+    assert normalize_postcode_district("A") is None
+
+
+def test_normalize_postcode_district_malformed_full_length_input_still_rejected():
+    """A 5-7 char string that fails the inward-code shape check must not
+    fall through to the bare-outward-code path -- outward codes are at
+    most 4 characters, so this is already impossible, but worth locking
+    in explicitly since the fallback was added right next to this check."""
+    assert normalize_postcode_district("ABCDE") is None
+
+
 def test_normalize_company_name_strips_legal_suffix():
     assert normalize_company_name("THE COB KINGS LTD") == "THE COB KINGS"
     assert normalize_company_name("Acme Catering Limited") == "ACME CATERING"
