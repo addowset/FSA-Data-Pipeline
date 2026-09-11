@@ -98,6 +98,20 @@ def _check_reupload_guard(insert_count: int, trailing_counts: list[int], config:
         return False, None  # ratio is noisy/meaningless at tiny volumes
 
     median = statistics.median(trailing_counts)
+    if median == 0:
+        # A zero trailing median isn't "no tolerance for any insert" --
+        # it means this authority has no real baseline to compare
+        # against (quiet, or batches registrations occasionally), and
+        # median * ratio degenerates to 0, which would quarantine any
+        # single non-trivial day no matter how ordinary. Confirmed real
+        # 2026-09-11: every one of 189 of this project's 190 quarantines
+        # to date was exactly this degenerate case, not a genuine spike
+        # against a real baseline (zero of 190 were) -- a council
+        # batching 46 registrations after weeks of none is normal
+        # behaviour, not a data artefact. Fall back to the absolute
+        # threshold alone, already checked above.
+        return False, None
+
     limit = median * config.reupload_ratio_threshold
     if insert_count > limit:
         return True, (

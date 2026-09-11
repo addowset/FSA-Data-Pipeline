@@ -9,7 +9,7 @@ Full project brief: [CLAUDE.md](CLAUDE.md). Build proceeds in stages; see
 
 ## Status
 
-**Stages 1-6 of 7 done and live-verified.** Plus supplementary
+**All 7 stages done and live-verified.** Plus supplementary
 postcode-backfill and operator-lookup jobs, outside the staged build order.
 
 Stage 1 — fetches the FHRS local-authority index and all 363 authorities'
@@ -548,7 +548,45 @@ authorities) check stable identity fields only, never a legitimately-
 changing one like RatingValue. 32 new tests, 241 total passing. See
 "Design notes" for the full calibration story.
 
-Not yet built: CSV export.
+Stage 7 (2026-09-11) — CSV export, the actual customer-facing
+deliverable. `scripts/export_csv.py` exports every classified INSERT
+event, filterable by postcode area, local authority, business type,
+classification and first-seen date range, per the brief. Deliberately
+no filtering by match status -- discussed with the user first: a
+Companies House match is a classification signal (it buys an
+incorporation date), not a contact channel (the registered office is
+routinely an accountant's, same reason the formation-agent discount
+exists), and an *unmatched* record skews toward the independent,
+owner-operated venues that are often the better prospect for this
+buyer, not the worse one. `match_status` ships as a plain visible
+column instead, alongside a new `address_completeness` column (`full` /
+`postcode_only` / `district_only` / `no_address`) -- checked against
+real data first: not one of the ~95,000 establishments whose only
+postcode comes from the live-API backfill has any street address line
+at all, a real, different way a row can be less usable than the brief's
+column list alone would show.
+
+**Building this surfaced a real, unrelated bug in stage 3's
+bulk-reupload guard, found and fixed before shipping the export on top
+of it.** The default "exclude quarantined events" behaviour was
+excluding **61% of all classified INSERT events** (4,142 of 6,773) --
+checked why, and 189 of the project's 190 quarantines to date (all but
+the one genuine 436-insert absolute-threshold spike) were a math
+degeneracy: `trailing_median × ratio` collapses to exactly 0 whenever an
+authority's trailing history is mostly zero inserts, so any batch of
+10+ registrations (the floor) after a quiet spell automatically
+"exceeded" that zero limit and got flagged as a suspected reupload
+artefact -- zero of the 190 were ever a genuine spike against a real
+nonzero baseline. Fixed in `fsa_pipeline/diff_engine.py`: a zero
+trailing median now falls back to the absolute threshold alone. Reran
+`diff_fhrs.py --force` across the full 21-day archive: quarantined
+events dropped from 4,142 to 436 (exactly the one real spike), and the
+export now correctly includes 6,337 of 6,773 events (93.6%) instead of
+2,631 (38.8%). 2 new diff-engine tests, 2 new CSV-export test files, 264
+total passing. See "Design notes" for the full numbers.
+
+Not wired into `run_daily.ps1` -- a deliverable generated on demand when
+preparing a delivery, not an unattended daily concern.
 
 Live-API collection for priority authorities (the original South West
 list) was in the brief but **dropped 2026-08-28** — see CLAUDE.md
@@ -741,6 +779,33 @@ whatever day the rebuild happens to run on. See "Design notes" for the
 four checks, the canaries, and the real-data calibration story behind
 the thresholds.
 
+## Running the export
+
+Not part of the daily scheduled run -- generate a deliverable on demand:
+
+```bash
+python scripts/export_csv.py
+```
+
+Reads only from the database, never touches raw files or the network.
+Exports every non-quarantined classified INSERT event to
+`exports/venues_<today>.csv` (override with `--output PATH`). All
+filters are optional and combine with AND:
+
+```bash
+python scripts/export_csv.py --postcode-area NG --classification NEW_VENUE --since 2026-08-20
+```
+
+- `--postcode-area` — e.g. `NG` (matches NG17, NG1, ...)
+- `--authority` — an authority code (exact) or a case-insensitive substring of its name, e.g. `857` or `Bristol`
+- `--business-type` — case-insensitive substring, e.g. `takeaway`
+- `--classification` — `NEW_VENUE` / `OPERATOR_CHANGE` / `UNKNOWN`
+- `--since` / `--until` — first-seen date bounds, `YYYY-MM-DD`, inclusive
+
+See "Design notes" for the column choices (`match_status` and
+`address_completeness` beyond the brief's own list) and the
+bulk-reupload guard fix this surfaced.
+
 ## Rebuilding the database
 
 The database is derived, rebuildable state; the raw archive is the actual
@@ -834,12 +899,12 @@ pytest
 
 ```
 fsa_pipeline/        shared library code (config, HTTP client, FHRS + Companies House
-                        parsing, archive writer, db, monitoring, canaries)
+                        parsing, archive writer, db, monitoring, canaries, csv_export)
 scripts/              entry-point scripts: collect_fhrs_bulk.py, parse_fhrs_bulk.py,
                         diff_fhrs.py, collect_companies_house.py, parse_companies_house.py,
                         lookup_operator_companies.py, match_companies_house.py,
                         backfill_postcodes.py, classify_insertions.py, monitor_pipeline.py,
-                        rebuild_db.py, run_daily.ps1 (scheduled task entry point)
+                        export_csv.py, rebuild_db.py, run_daily.ps1 (scheduled task entry point)
 raw/                  raw archive, gitignored — this is the asset, back it up separately
   fhrs/<date>/        one dated directory per collection run
     _authorities-index.xml.gz   that day's local-authority list, as returned by the API
@@ -859,6 +924,8 @@ raw/                  raw archive, gitignored — this is the asset, back it up 
 logs/                 per-run logs, gitignored
   metrics_<date>.log          stage 6's reported metrics, overwritten each run
   _alerts_<date>.log          stage 6's alerts, only present when a check fired
+exports/              stage 7's CSV deliverables, gitignored (can contain a buyer's feed)
+  venues_<date>.csv           one export per run, unless --output overrides the path
 config.toml           non-secret configuration (URLs, timeouts, contact email)
 fsa_pipeline.db        SQLite database, gitignored (this is derived state -- rebuildable
                         from raw/ by reparsing, unlike raw/ itself)
@@ -1394,6 +1461,89 @@ and confirms the lookup still finds it.
   `fsa_pipeline/canaries.py`.
 
   32 new tests, 241 total passing.
+- **Stage 7 (CSV export), 2026-09-11.** `fsa_pipeline/csv_export.py` +
+  `scripts/export_csv.py`. Columns match the brief's exact list (business
+  name, address, postcode, business type, first-seen date,
+  classification, confidence, reason, link to the FHRS record, company
+  number and incorporation date where matched) plus four additions
+  agreed with the user before building: `fhrsid` and `authority_name`
+  (both useful for a buyer auditing a row), `match_status`, and
+  `address_completeness`.
+
+  **Why no filter on match status, discussed with the user first (they'd
+  independently talked it through with another Claude session and
+  brought the reasoning back):** a Companies House match buys an
+  incorporation date, a classification signal -- not a contact channel.
+  The registered office is routinely an accountant's (the same finding
+  behind the formation-agent/high-density-address discount, already
+  built for the matcher). The buyer for this feed does field sales --
+  drives to the venue, walks in -- so the FHRS address itself is the
+  real contact method regardless of match status, and an *unmatched*
+  record skews toward independent, owner-operated venues, often the
+  *better* prospect for a small supplier (a matched national chain has
+  central procurement and no interest in a local roaster). Filtering to
+  matched records would systematically remove the customer's best leads
+  while keeping the ones they can't sell to -- an expensive, invisible
+  mistake. `match_status` ships as a plain column instead, same
+  treatment as `classification`/`confidence` -- the buyer filters it
+  themselves if they want to.
+
+  **`address_completeness` exists because match status turned out not to
+  be the only axis a lead's usability depends on.** Checked the real
+  cross-tab before designing this: `address_line_1` alone is a bad
+  completeness signal (31.8% of establishments have it NULL, but 97,358
+  of those have real content in lines 2-4 instead -- the council shifted
+  the address up a field, still a perfectly usable address).
+  `COALESCE`ing across all four address lines is the real "is there a
+  street address" test: 15.7% of the whole estate (96,954 rows) have
+  genuinely nothing across all four. Separately, and more strikingly:
+  **not one of the ~95,000 live-API-backfilled postcodes is a full
+  postcode** -- all of them are bare districts, and every single one of
+  those rows also has zero address lines. A full postcode dominates
+  usefulness over street-line presence in practice (a satnav gets you to
+  the building on a postcode alone, only to a wide area on a bare
+  district), so `address_completeness` is `full` / `postcode_only` /
+  `district_only` / `no_address`, in that priority order -- see
+  `fsa_pipeline/csv_export.py`'s docstring for the exact rule.
+
+  **The FHRS record URL wasn't assumed -- verified live before use, per
+  "verify, don't assume."** No prior reference to the public
+  `ratings.food.gov.uk` URL format existed anywhere in the repo (every
+  existing reference is to an API endpoint, never the public page).
+  Fetched `https://ratings.food.gov.uk/business/5` directly: 200, no
+  redirect, page content ("The Elvetham Hotel", Fleet Road, RG27 8AR)
+  matches the database row for FHRSID 5 exactly. `{FHRSID}` alone is
+  sufficient -- no slug needed. One gotcha worth knowing: an unknown
+  FHRSID 307-redirects to the site root rather than 404ing, so a dead
+  link in an old export degrades silently.
+
+  **Building this surfaced a real, unrelated bug in stage 3's
+  bulk-reupload guard, fixed before shipping the export on top of it.**
+  The default "exclude quarantined events" behaviour (never send a
+  suspected data artefact to a customer) was excluding 61% of all
+  classified INSERT events -- 4,142 of 6,773. Broke down all 190
+  quarantines to date by cause: 1 was the genuine absolute-threshold
+  spike (436 inserts in one day, real); **189 of 190 were a math
+  degeneracy**, zero were a genuine ratio-based spike against a real
+  nonzero baseline. `fsa_pipeline/diff_engine.py`'s guard computes
+  `trailing_median × ratio` as the quarantine limit -- for an authority
+  whose trailing history is mostly zero inserts (quiet, or batches
+  registrations occasionally), the median is exactly 0, so the limit
+  collapses to 0, and *any* batch of 10+ registrations (the existing
+  ratio floor) after a quiet spell automatically "exceeds" a zero limit
+  and gets flagged, even though a council processing 46 registrations
+  after weeks of none is ordinary behaviour, not a reupload artefact.
+  Fixed: a zero trailing median now skips the ratio check entirely and
+  falls back to the absolute threshold alone (already checked first, so
+  a genuine 436-insert spike is still caught). Reran `diff_fhrs.py
+  --force` across the full 21-day archive to reclassify history:
+  quarantined events dropped from 4,142 to 436 (exactly the one real
+  spike, confirmed by re-inspecting quarantine reasons after the
+  rerun), and the export now correctly includes 6,337 of 6,773 events
+  (93.6%) instead of 2,631 (38.8%). 2 new diff-engine tests locking in
+  both the fix and that the absolute threshold still fires.
+
+  21 new tests (`tests/test_csv_export.py`), 264 total passing.
 
 ## Data licensing
 

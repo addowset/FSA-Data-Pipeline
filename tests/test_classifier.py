@@ -51,6 +51,7 @@ def make_config(**overrides) -> Config:
         monitoring_record_count_deviation_ratio=0.5, monitoring_record_count_median_window_days=28,
         monitoring_record_count_min_history_days=5, monitoring_record_count_min_floor=10,
         monitoring_max_skipped_record_ratio=0.01,
+        export_output_dir=Path("exports"),
     )
     return dataclasses.replace(base, **overrides)
 

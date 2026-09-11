@@ -144,6 +144,20 @@ def normalize_postcode_district(postcode: str | None) -> str | None:
     return None
 
 
+def normalize_postcode_area(postcode: str | None) -> str | None:
+    """Extracts the postcode AREA (the 1-2 letter prefix before any digit
+    -- "NG" from "NG17 3GA", "SW" from "SW1A 1AA", "M" from "M1 1AE") --
+    coarser than normalize_postcode_district's district, added for stage
+    7's CSV export (filterable "by postcode area" per the brief). Areas
+    with a shared prefix stay distinct ("N" vs "NW") since this matches
+    the full leading alphabetic run, not just the first character."""
+    district = normalize_postcode_district(postcode)
+    if district is None:
+        return None
+    match = re.match(r"^[A-Z]+", district)
+    return match.group() if match else None
+
+
 def normalize_company_name(name: str | None) -> str:
     """Uppercases, strips legal suffixes (LIMITED/LTD/LLP/...) and
     punctuation, so a Companies House legal name and an FHRS trading name

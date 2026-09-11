@@ -300,6 +300,13 @@ record_count_min_floor = 10
 # worth a look.
 max_skipped_record_ratio = 0.01
 
+[export]
+# Stage 7 of the brief: CSV export, the customer-facing deliverable.
+# scripts/export_csv.py writes here by default -- gitignored, same as
+# every other derived/output directory (raw/, logs/, the .db file
+# itself), since this can contain a buyer's actual feed.
+output_dir = "exports"
+
 [contact]
 # Used in the User-Agent header sent with every request, per FSA's request
 # for an honest, identifiable client. Not a secret.

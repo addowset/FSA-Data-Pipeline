@@ -56,6 +56,7 @@ def make_config(**overrides) -> Config:
         monitoring_record_count_deviation_ratio=0.5, monitoring_record_count_median_window_days=28,
         monitoring_record_count_min_history_days=5, monitoring_record_count_min_floor=10,
         monitoring_max_skipped_record_ratio=0.01,
+        export_output_dir=Path("exports"),
     )
     return dataclasses.replace(base, **overrides)
 
@@ -238,6 +239,52 @@ def test_reupload_guard_ignores_ratio_below_floor(tmp_path):
     result = compute_diff_for_authority(conn, AUTHORITY, "2026-08-21", config)
 
     assert not result.quarantined
+
+
+def test_reupload_guard_zero_trailing_median_does_not_quarantine(tmp_path):
+    """A quiet authority (all-zero trailing history) that suddenly gets a
+    real batch of registrations must not be quarantined just because
+    median*ratio degenerates to 0 -- confirmed real 2026-09-11: 189 of
+    this project's 190 quarantines to date were exactly this false
+    positive, zero were a genuine spike against a real nonzero baseline.
+    Falls back to the absolute threshold alone (still enforced)."""
+    conn = db.connect(tmp_path / "t.db")
+    config = make_config(reupload_min_history_days=3, reupload_ratio_min_floor=5, reupload_absolute_threshold=150)
+
+    # Five prior days with zero inserts -- trailing median is exactly 0.
+    dates = ["2026-08-15", "2026-08-16", "2026-08-17", "2026-08-18", "2026-08-19"]
+    collect_and_parse(conn, AUTHORITY, dates[0], [])
+    for d in dates[1:]:
+        collect_and_parse(conn, AUTHORITY, d, [])
+        result = compute_diff_for_authority(conn, AUTHORITY, d, config)
+        record_diff(conn, AUTHORITY, d, result, d + "T00:00:00Z")
+
+    # A real batch of 46 new registrations -- ordinary, not a reupload.
+    batch = [make_establishment(i) for i in range(1, 47)]
+    collect_and_parse(conn, AUTHORITY, "2026-08-20", batch)
+    result = compute_diff_for_authority(conn, AUTHORITY, "2026-08-20", config)
+
+    assert not result.quarantined
+    assert result.insert_count == 46
+
+
+def test_reupload_guard_zero_trailing_median_still_enforces_absolute_threshold(tmp_path):
+    conn = db.connect(tmp_path / "t.db")
+    config = make_config(reupload_min_history_days=3, reupload_ratio_min_floor=5, reupload_absolute_threshold=10)
+
+    dates = ["2026-08-15", "2026-08-16", "2026-08-17", "2026-08-18", "2026-08-19"]
+    collect_and_parse(conn, AUTHORITY, dates[0], [])
+    for d in dates[1:]:
+        collect_and_parse(conn, AUTHORITY, d, [])
+        result = compute_diff_for_authority(conn, AUTHORITY, d, config)
+        record_diff(conn, AUTHORITY, d, result, d + "T00:00:00Z")
+
+    batch = [make_establishment(i) for i in range(1, 47)]  # 46 > absolute_threshold=10
+    collect_and_parse(conn, AUTHORITY, "2026-08-20", batch)
+    result = compute_diff_for_authority(conn, AUTHORITY, "2026-08-20", config)
+
+    assert result.quarantined
+    assert "absolute threshold" in result.quarantine_reason
 
 
 def test_record_diff_writes_events_and_is_overwritable(tmp_path):

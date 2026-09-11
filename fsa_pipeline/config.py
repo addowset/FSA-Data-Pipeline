@@ -83,6 +83,7 @@ class Config:
     monitoring_record_count_min_history_days: int
     monitoring_record_count_min_floor: int
     monitoring_max_skipped_record_ratio: float
+    export_output_dir: Path
 
     @property
     def user_agent(self) -> str:
@@ -106,6 +107,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     officer_churn = raw["officer_churn"]
     operator_search = raw["operator_search"]
     monitoring = raw["monitoring"]
+    export = raw["export"]
 
     return Config(
         authorities_url=fhrs["authorities_url"],
@@ -160,4 +162,5 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         monitoring_record_count_min_history_days=int(monitoring["record_count_min_history_days"]),
         monitoring_record_count_min_floor=int(monitoring["record_count_min_floor"]),
         monitoring_max_skipped_record_ratio=float(monitoring["max_skipped_record_ratio"]),
+        export_output_dir=PROJECT_ROOT / export["output_dir"],
     )
