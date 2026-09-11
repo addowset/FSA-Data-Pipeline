@@ -102,9 +102,9 @@ def main() -> None:
     # not interleaved with the parse loop above.
     replay_dates(python, scripts_dir, project_root, "diff_fhrs.py", fhrs_dates)
 
-    def run_once(script_name: str) -> None:
+    def run_once(script_name: str, extra_args: list[str] | None = None) -> None:
         print(f"--- {script_name} ---")
-        result = subprocess.run([python, str(scripts_dir / script_name)], cwd=str(project_root))
+        result = subprocess.run([python, str(scripts_dir / script_name), *(extra_args or [])], cwd=str(project_root))
         if result.returncode != 0:
             print(f"{script_name} failed, aborting rebuild")
             sys.exit(1)
@@ -125,6 +125,12 @@ def main() -> None:
     # a no-op unless the user has explicitly enabled it, same as every
     # other step here being skippable when its raw archive is absent.
     run_once("check_officer_churn.py")
+
+    # Reports against the last day actually replayed, not "today" --
+    # a rebuild can run on any day, and defaulting to today would flag
+    # all 363 authorities as MISSING COLLECTION purely because today's
+    # real daily run (if any) hasn't happened during this rebuild.
+    run_once("monitor_pipeline.py", ["--date", fhrs_dates[-1]])
 
     print("rebuild complete")
 

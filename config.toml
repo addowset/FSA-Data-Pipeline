@@ -227,6 +227,79 @@ request_delay_seconds = 0.5
 # than a measured value.
 recheck_after_days = 30
 
+[monitoring]
+# Stage 6 of the brief: "Metrics I need reported" + "Monitoring" (alert
+# on staleness/anomalies). Reads only from tables every earlier stage
+# already writes -- no new collection, this is a reporting pass. See
+# fsa_pipeline/monitoring.py and scripts/monitor_pipeline.py.
+#
+# "Alert me (email or a local log)" in the brief's Monitoring section
+# runs into "no web UI, no dashboard, no REST API, no billing, no email
+# sending... don't build it now" in the brief's own Output section --
+# resolved 2026-09-11 in favour of the log, matching the existing
+# _review_queue_<date>.log precedent (scripts/classify_insertions.py):
+# an _alerts_<date>.log, only written to when something actually fires.
+#
+# ExtractDate staleness: an authority's current ExtractDate age (days
+# since its most recent successful collection's ExtractDate) is checked
+# against `staleness_ratio` times that authority's OWN historical median
+# gap between successive ExtractDates -- not a fixed number of days,
+# since cadence genuinely varies by authority (confirmed 2026-09-09,
+# see README "Design notes": some authorities refresh same-day, one
+# hadn't in 141 days). Needs at least `cadence_min_history` distinct
+# ExtractDates on record before a median is trustworthy.
+#
+# The brief's own number was 2.0 -- tested against real data 2026-09-11
+# and rejected: with only ~3 weeks of archive, a per-authority median
+# computed from a handful of gaps is too noisy (72 of 355 authorities
+# fired at ratio=2.0 on a single real day, most only a few days "overdue"
+# against a cadence estimate that doesn't yet reflect their true
+# long-run pattern). Raised to 3.0 and paired with `staleness_min_age_days`
+# (an absolute floor, same shape as [diffing]'s reupload_ratio_min_floor
+# -- a ratio alone is meaningless when the absolute gap is trivial) --
+# together these bring a real day down to 7 authorities, an actually
+# actionable list. Provisional, like every other threshold in this file
+# calibrated against limited history -- revisit once the archive has
+# months, not weeks, behind it.
+staleness_ratio = 3.0
+staleness_min_age_days = 10
+cadence_min_history = 3
+# Fallback for an authority with fewer than `cadence_min_history`
+# distinct ExtractDates on record -- the ratio check can't run without a
+# computable cadence, but that's exactly the situation for the worst
+# real cases found 2026-09-11: River Tees (141d stale), Hull and Goole
+# Port (135d), Dumfries and Galloway (110d) have each shown only ONE
+# distinct ExtractDate in the whole archive, so they'd be silently
+# invisible to the ratio check forever without this. An authority never
+# once seen to refresh is more worth flagging than one with a fast but
+# noisy-looking cadence, not less.
+staleness_fallback_absolute_days = 30
+
+# Record-count deviation: an authority's item_count (total establishments
+# in that day's bulk file -- the literal "record count", confirmed with
+# the user 2026-09-11 as distinct from the daily INSERT count, which
+# swings by weekday/weekend and would false-alarm constantly on a naive
+# median) compared against its own trailing median. Same min-history/
+# min-floor shape as [diffing]'s bulk-reupload guard (deliberately
+# reused, not reinvented) -- a new authority with no history, or a tiny
+# authority where a swing of a couple of records is a large percentage,
+# shouldn't trigger noise.
+record_count_deviation_ratio = 0.5
+record_count_median_window_days = 28
+record_count_min_history_days = 5
+record_count_min_floor = 10
+
+# Parse failure rate: not yet calibrated against a real failure (21 days
+# of real data checked 2026-09-09/10, zero parse failures and zero
+# skipped records so far) -- kept deliberately simple rather than
+# building trend detection for a failure mode that's never happened.
+# Any parse_error status today is always an alert. skipped_records is
+# only a per-record recovery within an otherwise-successful parse (see
+# fsa_pipeline/fhrs_parse.py), so it gets its own, gentler threshold --
+# this ratio of an authority's records skipped in one day before it's
+# worth a look.
+max_skipped_record_ratio = 0.01
+
 [contact]
 # Used in the User-Agent header sent with every request, per FSA's request
 # for an honest, identifiable client. Not a secret.

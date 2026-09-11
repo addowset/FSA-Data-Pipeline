@@ -16,9 +16,8 @@ resolves the gap -- some postcodes are missing at the source and the
 live API doesn't have them either (e.g. West Lindsey, 0% recovered).
 
 Idempotent per (authority, day): an authority already backfilled today is
-skipped. Pass --force to rerun. Not wired into run_daily.ps1 -- this is
-a supplementary job, not part of the core daily pipeline; run it manually
-or schedule it separately at whatever cadence you want.
+skipped. Pass --force to rerun. Wired into run_daily.ps1, after FHRS
+parsing and before matching.
 
 Usage:
     python scripts/backfill_postcodes.py [--force]

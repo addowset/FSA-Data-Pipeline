@@ -74,6 +74,15 @@ class Config:
     officer_churn_window_days: int
     officer_churn_request_delay_seconds: float
     operator_search_recheck_after_days: int
+    monitoring_staleness_ratio: float
+    monitoring_staleness_min_age_days: int
+    monitoring_staleness_fallback_absolute_days: int
+    monitoring_cadence_min_history: int
+    monitoring_record_count_deviation_ratio: float
+    monitoring_record_count_median_window_days: int
+    monitoring_record_count_min_history_days: int
+    monitoring_record_count_min_floor: int
+    monitoring_max_skipped_record_ratio: float
 
     @property
     def user_agent(self) -> str:
@@ -96,6 +105,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     classification = raw["classification"]
     officer_churn = raw["officer_churn"]
     operator_search = raw["operator_search"]
+    monitoring = raw["monitoring"]
 
     return Config(
         authorities_url=fhrs["authorities_url"],
@@ -141,4 +151,13 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         officer_churn_window_days=int(officer_churn["window_days"]),
         officer_churn_request_delay_seconds=float(officer_churn["request_delay_seconds"]),
         operator_search_recheck_after_days=int(operator_search["recheck_after_days"]),
+        monitoring_staleness_ratio=float(monitoring["staleness_ratio"]),
+        monitoring_staleness_min_age_days=int(monitoring["staleness_min_age_days"]),
+        monitoring_staleness_fallback_absolute_days=int(monitoring["staleness_fallback_absolute_days"]),
+        monitoring_cadence_min_history=int(monitoring["cadence_min_history"]),
+        monitoring_record_count_deviation_ratio=float(monitoring["record_count_deviation_ratio"]),
+        monitoring_record_count_median_window_days=int(monitoring["record_count_median_window_days"]),
+        monitoring_record_count_min_history_days=int(monitoring["record_count_min_history_days"]),
+        monitoring_record_count_min_floor=int(monitoring["record_count_min_floor"]),
+        monitoring_max_skipped_record_ratio=float(monitoring["max_skipped_record_ratio"]),
     )

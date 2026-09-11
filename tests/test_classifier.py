@@ -46,6 +46,11 @@ def make_config(**overrides) -> Config:
         multi_venue_company_threshold=5,
         officer_churn_enabled=False, officer_churn_window_days=60, officer_churn_request_delay_seconds=0.0,
         operator_search_recheck_after_days=30,
+        monitoring_staleness_ratio=3.0, monitoring_staleness_min_age_days=10,
+        monitoring_staleness_fallback_absolute_days=30, monitoring_cadence_min_history=3,
+        monitoring_record_count_deviation_ratio=0.5, monitoring_record_count_median_window_days=28,
+        monitoring_record_count_min_history_days=5, monitoring_record_count_min_floor=10,
+        monitoring_max_skipped_record_ratio=0.01,
     )
     return dataclasses.replace(base, **overrides)
 

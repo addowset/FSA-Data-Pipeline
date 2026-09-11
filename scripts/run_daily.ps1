@@ -16,8 +16,12 @@
 # post_code values) and before matching, so today's backfilled postcodes
 # are available for today's matching pass, which reads
 # COALESCE(post_code, postcode_from_live_api). Classification runs last
-# -- it needs both the matcher's evidence and the full
-# establishments_current baseline for its address-history check.
+# among the data stages -- it needs both the matcher's evidence and the
+# full establishments_current baseline for its address-history check.
+# Monitoring (stage 6) runs after that, last of all -- it's a pure
+# reporting/alerting pass over what every earlier stage just wrote, not
+# a failure of its own if something upstream had problems (that's
+# exactly what it exists to report).
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
@@ -50,8 +54,11 @@ $matchExit = $LASTEXITCODE
 & $python (Join-Path $root "scripts\classify_insertions.py")
 $classifyExit = $LASTEXITCODE
 
-if ($collectExit -ne 0 -or $parseExit -ne 0 -or $diffExit -ne 0 -or $chCollectExit -ne 0 -or $chParseExit -ne 0 -or $operatorSearchExit -ne 0 -or $backfillExit -ne 0 -or $matchExit -ne 0 -or $classifyExit -ne 0) {
-    Write-Error "run_daily.ps1: fhrs collect=$collectExit parse=$parseExit diff=$diffExit / ch collect=$chCollectExit parse=$chParseExit / operator search=$operatorSearchExit / backfill=$backfillExit / match=$matchExit / classify=$classifyExit"
+& $python (Join-Path $root "scripts\monitor_pipeline.py")
+$monitorExit = $LASTEXITCODE
+
+if ($collectExit -ne 0 -or $parseExit -ne 0 -or $diffExit -ne 0 -or $chCollectExit -ne 0 -or $chParseExit -ne 0 -or $operatorSearchExit -ne 0 -or $backfillExit -ne 0 -or $matchExit -ne 0 -or $classifyExit -ne 0 -or $monitorExit -ne 0) {
+    Write-Error "run_daily.ps1: fhrs collect=$collectExit parse=$parseExit diff=$diffExit / ch collect=$chCollectExit parse=$chParseExit / operator search=$operatorSearchExit / backfill=$backfillExit / match=$matchExit / classify=$classifyExit / monitor=$monitorExit"
     exit 1
 }
 

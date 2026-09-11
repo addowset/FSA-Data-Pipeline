@@ -9,8 +9,8 @@ Full project brief: [CLAUDE.md](CLAUDE.md). Build proceeds in stages; see
 
 ## Status
 
-**Stages 1-5 of 7 done and live-verified.** Plus a supplementary
-postcode-backfill job, outside the staged build order.
+**Stages 1-6 of 7 done and live-verified.** Plus supplementary
+postcode-backfill and operator-lookup jobs, outside the staged build order.
 
 Stage 1 — fetches the FHRS local-authority index and all 363 authorities'
 bulk XML files daily, archives every response unmodified (gzip-compressed)
@@ -113,10 +113,10 @@ and specifically by council, not by scheme or region — e.g. Falkirk and
 the Western Isles resolved ~100%, while Aberdeen City, Edinburgh and
 Aberdeenshire resolved 0% (the postcode is genuinely missing from FSA's
 system for those councils via any access method, confirmed by testing
-the live API directly). 15 new tests, all passing. **Not wired into
-`run_daily.ps1`** — deliberately a separate, manually-run job for now;
-see "Running the postcode backfill" for how to run it and the scheduling
-question still open.
+the live API directly). 15 new tests, all passing. Wired into
+`run_daily.ps1` shortly after this was written (this paragraph is
+otherwise unedited from 2026-08-26) — see "Running the postcode
+backfill" for how to run it standalone.
 
 Stage 5 — classifies each FHRS INSERT event as `NEW_VENUE` /
 `OPERATOR_CHANGE` / `UNKNOWN` with a confidence grade and a
@@ -516,7 +516,39 @@ the tool now also shows `recently_incorporated` per row.
 4 new tests, 184 total passing. Match Ledger republished with the fix
 and the new field.
 
-Not yet built: metrics/monitoring, CSV export.
+Stage 6 (2026-09-11) — metrics reporting and monitoring, a pure
+read-only pass over tables every earlier stage already writes (no new
+collection). `scripts/monitor_pipeline.py` writes `logs/metrics_<date>.log`
+(new records per authority, INSERT classification ratio, ExtractDate age,
+parse failure rate) every run, and only writes `logs/_alerts_<date>.log`
+when a check actually fires — same "log, not email" resolution as the
+brief's own Output section demanded ("no email sending... don't build it
+now"). Four checks plus canaries, all against real data before
+finalizing any threshold: ExtractDate staleness (an authority's own
+historical cadence × a ratio, **recalibrated from the brief's literal
+2x** after that fired on 72 of 355 authorities in one real day — 3 weeks
+of archive isn't enough to trust a noisy per-authority median yet;
+3x + a 10-day absolute floor brought a real day down to 5-10 actionable
+alerts), record-count deviation (total establishments per authority vs.
+trailing 28-day median — deliberately the *total* count, not daily
+INSERTs, which swing ~500x by weekday/weekend and would false-alarm
+constantly), parse failures (0 real ones yet, so kept deliberately
+simple rather than building trend detection for a failure mode that's
+never happened), and "did a collection job run" (a real gap found:
+`collection_runs` has **zero trace** of an authority whose raw file was
+never fetched, so this cross-references the full 363-authority list, not
+just scanned rows). A late fix mattered as much as the threshold: the
+ratio check needs 2+ historical ExtractDates to compute a cadence at
+all, which made it blind to the *worst* real cases (River Tees, 141 days
+stale; Hull and Goole Port, 135 days) since they've shown only ONE
+ExtractDate in the whole archive — an absolute-days fallback for
+insufficient history fixed this, catching exactly those cases. 5 real
+canary FHRSIDs (picked from the archive's first day, spread across 5
+authorities) check stable identity fields only, never a legitimately-
+changing one like RatingValue. 32 new tests, 241 total passing. See
+"Design notes" for the full calibration story.
+
+Not yet built: CSV export.
 
 Live-API collection for priority authorities (the original South West
 list) was in the brief but **dropped 2026-08-28** — see CLAUDE.md
@@ -682,9 +714,32 @@ python scripts/classify_insertions.py
 Reads only from the database, never touches raw files or the network.
 Idempotent per (FHRSID, INSERT date); pass `--force` to reclassify
 everything (evidence changes as new Companies House data or new FHRS
-establishments arrive). Part of the daily scheduled run, last in the
-chain — it needs both the matcher's evidence and the current
-`establishments_current` baseline.
+establishments arrive). Part of the daily scheduled run, last of the
+data stages — it needs both the matcher's evidence and the current
+`establishments_current` baseline. Monitoring runs after it.
+
+## Running the monitor
+
+Part of the daily scheduled run, last of all — reports metrics and runs
+the monitoring checks from stage 6 of the brief:
+
+```bash
+python scripts/monitor_pipeline.py
+```
+
+Reads only from the database, plus that day's `raw/fhrs/<date>/_manifest.json`
+if present (to tell a genuine fetch failure apart from an authority
+simply not reached yet). Never touches the network. Writes
+`logs/metrics_<date>.log` every run (overwritten, not appended — a
+report to read, not a log to tail) and `logs/_alerts_<date>.log` only
+when a check actually fires (appended, same style as
+`_review_queue_<date>.log`). Always exits 0 — an alert firing means
+something's worth a look, not that this script failed. `--date
+YYYY-MM-DD` reports against a different day than today; `rebuild_db.py`
+uses this to report against the last day it actually replayed, not
+whatever day the rebuild happens to run on. See "Design notes" for the
+four checks, the canaries, and the real-data calibration story behind
+the thresholds.
 
 ## Rebuilding the database
 
@@ -699,10 +754,14 @@ python scripts/rebuild_db.py
 Wipes `fsa_pipeline.db` and replays every dated directory under
 `raw/fhrs/` through `parse_fhrs_bulk.py` then `diff_fhrs.py`, postcode
 backfill, every dated directory under `raw/companies-house/` through
-`parse_companies_house.py`, matching, then classification, in that
-order. Never touches the network — postcode backfill reuses the
-already-archived pages under `raw/fhrs-live/<date>/` rather than
-re-querying the live API, provided that directory still exists.
+`parse_companies_house.py`, operator lookup, matching, classification,
+and finally monitoring, in that order. Mostly a replay, not a re-fetch —
+postcode backfill reuses the already-archived pages under
+`raw/fhrs-live/<date>/` rather than re-querying the live API, provided
+that directory still exists. The exception is operator lookup: it has
+no local-replay path yet, so a rebuild re-hits the Companies House API
+for it (see "Running the operator lookup" — same acknowledged gap as
+`check_officer_churn.py`).
 
 **Fixed 2026-08-28**: an earlier version of this script didn't drop
 `postcode_backfill_runs`/`postcode_backfill_events`, so a rebuild would
@@ -775,11 +834,11 @@ pytest
 
 ```
 fsa_pipeline/        shared library code (config, HTTP client, FHRS + Companies House
-                        parsing, archive writer, db)
+                        parsing, archive writer, db, monitoring, canaries)
 scripts/              entry-point scripts: collect_fhrs_bulk.py, parse_fhrs_bulk.py,
                         diff_fhrs.py, collect_companies_house.py, parse_companies_house.py,
                         lookup_operator_companies.py, match_companies_house.py,
-                        backfill_postcodes.py, classify_insertions.py,
+                        backfill_postcodes.py, classify_insertions.py, monitor_pipeline.py,
                         rebuild_db.py, run_daily.ps1 (scheduled task entry point)
 raw/                  raw archive, gitignored — this is the asset, back it up separately
   fhrs/<date>/        one dated directory per collection run
@@ -798,6 +857,8 @@ raw/                  raw archive, gitignored — this is the asset, back it up 
   fhrs-live/<date>/   one dated directory per postcode-backfill run
     <code>_page_NNNN.json.gz     one gzip-compressed raw live-API response page per authority
 logs/                 per-run logs, gitignored
+  metrics_<date>.log          stage 6's reported metrics, overwritten each run
+  _alerts_<date>.log          stage 6's alerts, only present when a check fired
 config.toml           non-secret configuration (URLs, timeouts, contact email)
 fsa_pipeline.db        SQLite database, gitignored (this is derived state -- rebuildable
                         from raw/ by reparsing, unlike raw/ itself)
@@ -1256,6 +1317,83 @@ and confirms the lookup still finds it.
   itself lands here: Evernutra Foods Ltd found and cited as evidence,
   incorporated too long before this record to count as a confirmed new
   venue, but no longer commercially blank.
+- **Stage 6 (metrics + monitoring), 2026-09-11 -- a pure reporting pass,
+  no new collection, and a threshold recalibration that only real data
+  could have surfaced.** `fsa_pipeline/monitoring.py` reads tables every
+  earlier stage already writes; `scripts/monitor_pipeline.py` orchestrates
+  and writes the two logs (see "Running the monitor").
+
+  **Alert channel resolved in favour of a log, not email** -- the
+  brief's Monitoring section offers "email or a local log," but its own
+  Output section says flatly "no email sending... don't build it now."
+  Went with the log, matching the existing `_review_queue_<date>.log`
+  precedent (`scripts/classify_insertions.py`).
+
+  **"Daily record count" confirmed with the user as total establishments
+  per authority (`collection_runs.item_count`), not daily INSERT count.**
+  Checked real data first: national INSERTs swing from ~1 on a weekend to
+  400-515 on a weekday -- a naive 28-day median mixing both would
+  false-alarm constantly or need day-of-week-aware comparison neither the
+  brief nor "keep it simple" calls for. Total establishment count doesn't
+  have this seasonality (the full snapshot, not the day's delta), so it's
+  both the literal reading of "record count" and the one that's actually
+  stable enough to monitor.
+
+  **ExtractDate staleness needed two real-data-driven corrections before
+  it was usable, not just implementable.** The brief's own number was
+  "2x historical median" -- tested against a real day (2026-09-10) and
+  rejected outright: 72 of 355 authorities fired, most only a few days
+  "overdue" against a per-authority median computed from just ~3 weeks
+  of archive, too little history to characterize an irregular refresh
+  pattern reliably. Fixed two ways: (1) raised the ratio to 3x and added
+  an absolute floor (`staleness_min_age_days=10`, mirroring
+  `[diffing]`'s existing `reupload_ratio_min_floor` -- a ratio alone is
+  meaningless when the absolute gap is trivial), bringing a real day down
+  to 5 alerts; (2) a separate, more important gap: the ratio check needs
+  >=2 distinct historical ExtractDates to compute a cadence at all, which
+  made it silently blind to the *worst* real cases -- River Tees (141
+  days stale), Hull and Goole Port (135 days), Dumfries and Galloway (110
+  days) have each shown only ONE ExtractDate in the whole archive, so
+  they'd never trigger the ratio check no matter how stale they got.
+  Added `staleness_fallback_absolute_days=30` for exactly this case: no
+  computable cadence yet, but flag it anyway past a flat threshold. Real
+  result after both fixes: 10 alerts on 2026-09-10, correctly including
+  all three of the worst-known cases. Every threshold here is marked
+  provisional in config.toml, same as `[diffing]`'s -- 3 weeks of archive
+  isn't enough to fully trust any of these numbers yet, revisit once
+  there's months of history.
+
+  **Collection-job-failure detection needed a cross-reference, not just
+  a table scan.** `collection_runs` has zero trace of an authority whose
+  raw file was never fetched at all (confirmed by reading
+  `parse_fhrs_bulk.py`: a missing raw file is logged and skipped, never
+  written to the database) -- a monitor that only scanned that table for
+  bad rows would see total silence, not failure. `check_missing_authorities`
+  cross-references the full 363-row `authorities` table instead, and
+  reads that day's `raw/fhrs/<date>/_manifest.json` (already written by
+  `collect_fhrs_bulk.py`) to give a specific fetch-error reason when
+  available, rather than just "missing."
+
+  **Parse failure rate kept deliberately simple.** 21 days of real data
+  checked before building anything: zero parse failures, zero skipped
+  records, ever. Rather than build trend/median detection for a failure
+  mode that's never happened, any `parse_error` status is an unconditional
+  alert, and `skipped_records` (a partial, per-record recovery within an
+  otherwise-successful parse -- see `fsa_pipeline/fhrs_parse.py`) only
+  alerts past a 1% per-authority ratio. Revisit with real trend data once
+  a real failure actually occurs.
+
+  **Canary FHRSIDs (green field -- nothing existed before this).** 5 real
+  establishments picked from the archive's first day (2026-08-20, so
+  continuously present the whole time we've been watching), spread
+  across 5 different authorities (England and Scotland) so one
+  authority's own quirks can't produce a false "everything's fine."
+  Only stable identity fields are compared (FHRSID, authority_code,
+  business_name, local_authority_business_id) -- never a field that
+  legitimately changes (RatingValue, RatingDate, address). See
+  `fsa_pipeline/canaries.py`.
+
+  32 new tests, 241 total passing.
 
 ## Data licensing
 
