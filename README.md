@@ -1544,6 +1544,100 @@ and confirms the lookup still finds it.
   both the fix and that the absolute threshold still fires.
 
   21 new tests (`tests/test_csv_export.py`), 264 total passing.
+- **CSV export review, 2026-09-11.** User asked a second Claude session
+  to review a real export and bring back the critique. Each specific
+  claim was checked against real data (not taken on trust) before
+  building anything -- some held up exactly, some didn't apply to how
+  this system actually works, and one led somewhere more interesting
+  than the original diagnosis.
+
+  **Highland's 131-record spike on 2026-08-29 is real, but isn't the
+  bulk-reupload guard failing.** Checked `diff_runs`: 131 inserts, only
+  5 deletes -- a true re-upload (the same businesses re-issued under new
+  FHRSIDs) would show matching insert/delete counts, so this isn't that.
+  Inspected the actual 131 records: several read as obviously wrong for
+  a "new venue" feed ("Isle of Muck Tearoom/craftshop CLOSED", private
+  addresses like "Kirkbi Estates" and "Reginal Director"), and their
+  FHRSIDs span an implausible range (359,851 to 1,983,300 -- 1.6M apart,
+  where every genuinely new August 2026 registration nationally sits in
+  the high-1.98M band). Reads as Highland integrating a historical
+  backlog into their FSA feed for the first time, not new registrations.
+  **But the classifier already handled it correctly**: 128 of 131 landed
+  `UNKNOWN`/LOW (no incorporation match, correctly not claimed as new);
+  the 3 that did classify as `NEW_VENUE` (2 HIGH, 1 LOW) all have
+  genuinely recent 2026 incorporation dates matching their high FHRSIDs
+  -- real signal, unrelated to the backlog. So the multi-layered caution
+  already built (incorporation-age gate, corroboration requirements)
+  absorbed this cleanly; nothing was misclassified. The residual issue
+  was narrower: obviously-junk `UNKNOWN` rows still shipped in the CSV.
+  Fixed directly -- any business_name containing "closed" is now always
+  excluded (19 of 21 real matches are genuine closure markers councils
+  put in the name field itself; the 2 exceptions, "The Closed Shop" and
+  "Behind Closed Doors", are an accepted rare cost). The rest of the
+  Highland pattern (implausibly low FHRSIDs) is a real, single-example
+  finding, not something to build a permanent heuristic on yet -- see
+  "Not built" below.
+
+  **Verified, not assumed:** same-day-predecessor rate is 35 of 731
+  OPERATOR_CHANGE events (4.8%), spread across authorities rather than
+  concentrated -- consistent with genuine turnover, not systematic
+  FHRSID churn (matches the review's own read). Authority coverage: 363
+  known authorities (not the reviewed session's assumed ~390), 342 with
+  at least one classified event -- the 21 without are a mix of already
+  known-stale authorities (River Tees, Dumfries and Galloway -- see
+  stage 6's monitoring, which already tracks exactly this) and
+  genuinely quiet ones with fresh recent ExtractDates and simply no
+  churn. No new mechanism needed; `monitor_pipeline.py` already covers
+  this ground. `company_status` distribution: **100% "active"**, by
+  construction -- both bulk collection and `lookup_operator_companies.py`
+  already filter to active-only, so a dissolved-company false match
+  (the review's specific worry) structurally can't reach
+  `evidence_company_number` today. Added the column anyway (cheap,
+  documents the guarantee explicitly, future-proofs against that
+  filter ever changing) but it won't currently vary.
+
+  **Columns added**, all verified feasible against real data first:
+  `previous_business_name`/`previous_fhrsid`/`previous_last_seen`
+  (`establishments_current` never deletes a departed predecessor's row,
+  confirmed by direct query -- the join always resolves), `company_name`,
+  `latitude`/`longitude` (74.5% complete), `days_since_first_seen`,
+  `rating_status` (`Rated` / `Awaiting Inspection` / `Awaiting
+  Publication` / `Exempt` / `Unknown` -- both spaced and unspaced
+  `RatingValue` spellings exist in the wild, checked and normalized),
+  `company_status`, `sic_codes`, `postcode_source`,
+  `authority_extract_date`, `google_maps_url`, `companies_house_url`.
+
+  **`reason` split into a short customer-facing summary and
+  `reason_detail`** (the original full diagnostic text, kept). The
+  reviewed export's actual weak spot: "Closest match was THE BOND BAKERY
+  LTD at similarity 0.0777, below the confidence threshold" reads as the
+  matcher confessing it's unreliable, not as a status. `customer_reason()`
+  composes the short version from clean structured fields
+  (classification, matched company name, previous trading name) --
+  deliberately never by sanitizing the free-text diagnostic string,
+  which would be fragile and could leak a score through some future
+  phrasing change. Verified live: the exact Bond Bakery row now reads
+  "No confirmed company match." in `reason`, with the full diagnostic
+  text preserved in `reason_detail` for whoever wants it.
+
+  **Not built, flagged for the user instead of guessed at:** a `town`
+  column -- checked real address-line samples, the line that holds the
+  town varies (sometimes line 2, sometimes line 3, sometimes line 4,
+  sometimes not present at all), so no fixed-position extraction is
+  reliable without a real gazetteer-backed heuristic, which is a
+  materially bigger piece of work than the other additions here.
+  Default-excluding non-food-adjacent business types (Schools,
+  Hospitals/Childcare, Manufacturers, Distributors, Farmers, Importers
+  -- confirmed 810 rows, matching the review's count exactly) -- a real
+  product-scope decision (a caterer selling to school kitchens *is* a
+  real buyer for some of these), not a data-quality fix, so left to the
+  existing `--business-type` filter rather than hard-coded. A stronger
+  anomaly check for Highland's specific pattern (implausibly low FHRSIDs
+  relative to the current national range) -- one real example isn't
+  enough to calibrate a threshold against, same discipline as every
+  other gate in this project.
+
+  24 new/changed tests, 288 total passing.
 
 ## Data licensing
 
