@@ -11,6 +11,7 @@ from fsa_pipeline.csv_export import (
     fhrs_url,
     format_sic_codes,
     google_maps_url,
+    is_noise_business_type,
     join_address,
     matches_filters,
     rating_status,
@@ -229,6 +230,35 @@ def test_matches_filters_combine_with_and():
 
 def test_matches_filters_no_filters_matches_everything():
     assert matches_filters(make_record()) is True
+
+
+# --- is_noise_business_type ---
+# Confirmed 2026-09-11 via two independent reviews of a real export:
+# these six aren't buyers this product's typical customer (a drinks
+# wholesaler, a coffee roaster) can sell to -- 810 real rows. An
+# export-layer default (--include-all-types opts back in), never a
+# database-level exclusion.
+
+def test_is_noise_business_type_true_for_the_six_excluded_types():
+    for bt in [
+        "School/college/university", "Hospitals/Childcare/Caring Premises",
+        "Manufacturers/packers", "Distributors/Transporters", "Farmers/growers", "Importers/Exporters",
+    ]:
+        assert is_noise_business_type(bt) is True
+
+
+def test_is_noise_business_type_false_for_sellable_types():
+    for bt in ["Restaurant/Cafe/Canteen", "Takeaway/sandwich shop", "Pub/bar/nightclub", "Mobile caterer"]:
+        assert is_noise_business_type(bt) is False
+
+
+def test_is_noise_business_type_exact_match_not_substring():
+    """Retailers - other must not accidentally match on a shared word
+    with an excluded type -- this is an exact-value set, not a substring
+    filter (that's business_type_substring in matches_filters, a
+    different, user-driven mechanism)."""
+    assert is_noise_business_type("Retailers - other") is False
+    assert is_noise_business_type(None) is False
 
 
 # --- build_row ---

@@ -42,6 +42,18 @@ threshold arithmetic) for a buyer or analyst who wants it -- useful, but
 the wrong first thing to show: "Closest match was THE BOND BAKERY LTD at
 similarity 0.0777" reads as a confession that the matcher is unreliable,
 not as a status. See customer_reason() for the exact composition rules.
+
+`NOISE_BUSINESS_TYPES` are excluded from the CSV by default (not from
+the database -- collection keeps everything, this is an export-layer
+decision only). Confirmed 2026-09-11 via two independent reviews of a
+real export: Schools, Hospitals/Childcare, Manufacturers, Distributors,
+Farmers, and Importers/Exporters aren't buyers this product's typical
+customer (a drinks wholesaler, a coffee roaster) can sell to -- 810 real
+rows. Unlike the business-type *filter* (matches_filters,
+--business-type), which narrows an already-intentional selection, this
+is a default scope decision -- --include-all-types opts back in, kept
+available because a contract-catering feed selling into exactly these
+categories is a plausible second product later.
 """
 
 from __future__ import annotations
@@ -56,6 +68,24 @@ from fsa_pipeline.matcher import normalize_postcode_area
 FHRS_URL_TEMPLATE = "https://ratings.food.gov.uk/business/{fhrsid}"
 COMPANIES_HOUSE_URL_TEMPLATE = "https://find-and-update.company-information.service.gov.uk/company/{number}"
 GOOGLE_MAPS_URL_TEMPLATE = "https://www.google.com/maps/search/?api=1&query={query}"
+
+# Excluded from the CSV export by default -- see module docstring for
+# why (confirmed 810 real rows, two independent reviews agreeing these
+# aren't buyers this product's typical customer can sell to). The exact
+# 14 real business_type values were confirmed against the database
+# 2026-09-11 -- these six, verbatim, not a substring match.
+NOISE_BUSINESS_TYPES = {
+    "School/college/university",
+    "Hospitals/Childcare/Caring Premises",
+    "Manufacturers/packers",
+    "Distributors/Transporters",
+    "Farmers/growers",
+    "Importers/Exporters",
+}
+
+
+def is_noise_business_type(business_type: str | None) -> bool:
+    return business_type in NOISE_BUSINESS_TYPES
 
 # Column order: identity/location, authority, business type/rating,
 # timing, classification summary, predecessor (operator-change), company

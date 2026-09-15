@@ -789,8 +789,11 @@ python scripts/export_csv.py
 
 Reads only from the database, never touches raw files or the network.
 Exports every non-quarantined classified INSERT event to
-`exports/venues_<today>.csv` (override with `--output PATH`). All
-filters are optional and combine with AND:
+`exports/venues_<today>.csv` (override with `--output PATH`), except
+Schools/Hospitals/Manufacturers/Distributors/Farmers/Importers, excluded
+by default (`--include-all-types` opts back in -- see "Design notes",
+this is an export-layer scope decision, the database keeps everything).
+All filters are optional and combine with AND:
 
 ```bash
 python scripts/export_csv.py --postcode-area NG --classification NEW_VENUE --since 2026-08-20
@@ -801,10 +804,12 @@ python scripts/export_csv.py --postcode-area NG --classification NEW_VENUE --sin
 - `--business-type` — case-insensitive substring, e.g. `takeaway`
 - `--classification` — `NEW_VENUE` / `OPERATOR_CHANGE` / `UNKNOWN`
 - `--since` / `--until` — first-seen date bounds, `YYYY-MM-DD`, inclusive
+- `--include-all-types` — include the six excluded-by-default business types
 
 See "Design notes" for the column choices (`match_status` and
-`address_completeness` beyond the brief's own list) and the
-bulk-reupload guard fix this surfaced.
+`address_completeness` beyond the brief's own list), the bulk-reupload
+guard fix this surfaced, and the FHRSID-based classification idea that
+was checked and rejected.
 
 ## Rebuilding the database
 
@@ -1638,6 +1643,48 @@ and confirms the lookup still finds it.
   other gate in this project.
 
   24 new/changed tests, 288 total passing.
+- **A second review's FHRSID-based classification idea, checked and
+  rejected, 2026-09-15.** A follow-up review (of the export above,
+  given code access) proposed that FHRSIDs are issued sequentially
+  nationally, and that a low FHRSID on a newly-appearing record signals
+  "backlog publication" rather than a real new venue -- recommending a
+  new `LIKELY_NEW` / `BACKLOG_PUBLICATION` split of `UNKNOWN`. The
+  aggregate pattern reproduced against real data (`UNKNOWN` rows do skew
+  toward lower FHRSIDs than `NEW_VENUE`/`OPERATOR_CHANGE`, and the named
+  examples -- Peckover House, a National Trust property; Age Concern
+  Luton Cafe -- check out as genuinely long-established). **But the
+  proposed mechanism doesn't survive a direct test**: every low-FHRSID
+  (<1.5M) row currently classified `NEW_VENUE` or `OPERATOR_CHANGE` was
+  pulled and checked for false positives, and instead surfaced seven
+  clearly genuine, `recently_incorporated=True`, HIGH-confidence new
+  venues with real 2026 incorporation dates sitting at FHRSIDs as low as
+  67,705 -- "Smash 121" (incorporated 2026-08-26), "Le Petit Rustique"
+  (2026-03-09), "The Rutland Hub" (2026-07-10), among others. A rule
+  built on "low FHRSID = backlog" would have actively reclassified these
+  as backlog -- a real precision regression, not an improvement. Read:
+  FHRSID numbering is very likely per-authority (some authorities simply
+  have lower ID pools/ranges for structural reasons unrelated to when a
+  specific business registered), so the aggregate correlation is real
+  but confounded by *which authorities* skew toward `UNKNOWN` for other
+  reasons -- not a clean per-record time signal. Not built. The
+  reviewed session's other two recommendations (skip the `town` column;
+  filter noise business types by default) were sound and are the two
+  items below.
+- **Noise business types excluded from the CSV by default, 2026-09-15**
+  (`fsa_pipeline/csv_export.py`'s `NOISE_BUSINESS_TYPES`). Two
+  independent reviews landed on the same six types -- School/college/
+  university, Hospitals/Childcare/Caring Premises, Manufacturers/
+  packers, Distributors/Transporters, Farmers/growers, Importers/
+  Exporters -- confirmed 810 real rows at the time, ~1,000 as the
+  archive's grown since. Deliberately an export-layer default, not a
+  collection-time or database-level exclusion: the brief's "never lose
+  data" priority means these rows are still collected and classified
+  exactly as before, just not shipped by default -- `--include-all-types`
+  opts back in, and a future contract-catering feed selling into exactly
+  these categories (schools, care homes) remains a live option on the
+  same underlying data. Distinct from the existing `--business-type`
+  filter (a substring match the buyer opts into) -- this is scope, not a
+  search refinement.
 
 ## Data licensing
 

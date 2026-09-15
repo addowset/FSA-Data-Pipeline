@@ -9,12 +9,19 @@ are always excluded, and why there's no filter on match status).
 Filterable by postcode area, local authority, business type,
 classification, and first-seen date range, per the brief. All filters
 are optional and combine with AND; omitting all of them exports
-everything.
+everything else this script would include by default.
+
+Schools, Hospitals/Childcare, Manufacturers, Distributors, Farmers, and
+Importers/Exporters are excluded by default -- not a filter, a scope
+decision (see fsa_pipeline/csv_export.py's NOISE_BUSINESS_TYPES) --
+pass --include-all-types to opt back in. The database and every other
+export keep these rows regardless; only this default changes.
 
 Usage:
     python scripts/export_csv.py [--postcode-area NG] [--authority 857]
         [--business-type takeaway] [--classification NEW_VENUE]
-        [--since 2026-08-20] [--until 2026-09-10] [--output PATH]
+        [--since 2026-08-20] [--until 2026-09-10] [--include-all-types]
+        [--output PATH]
 """
 
 from __future__ import annotations
@@ -29,7 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fsa_pipeline import db
 from fsa_pipeline.config import load_config
-from fsa_pipeline.csv_export import EXPORT_FIELDNAMES, build_row, fetch_records, matches_filters
+from fsa_pipeline.csv_export import EXPORT_FIELDNAMES, build_row, fetch_records, is_noise_business_type, matches_filters
 from fsa_pipeline.logging_utils import setup_logger
 
 
@@ -51,6 +58,7 @@ def run(args: argparse.Namespace) -> int:
             business_type_substring=args.business_type,
             classification=args.classification,
         )
+        and (args.include_all_types or not is_noise_business_type(r["business_type"]))
     ]
     logger.info("%d row(s) after filtering", len(filtered))
 
@@ -79,6 +87,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--classification", default=None, choices=["NEW_VENUE", "OPERATOR_CHANGE", "UNKNOWN"])
     parser.add_argument("--since", default=None, help="First-seen date lower bound, YYYY-MM-DD, inclusive")
     parser.add_argument("--until", default=None, help="First-seen date upper bound, YYYY-MM-DD, inclusive")
+    parser.add_argument(
+        "--include-all-types", action="store_true",
+        help="Include Schools/Hospitals/Manufacturers/Distributors/Farmers/Importers (excluded by default)",
+    )
     parser.add_argument("--output", default=None, help="Output CSV path (default: exports/venues_<today>.csv)")
     return parser.parse_args()
 
