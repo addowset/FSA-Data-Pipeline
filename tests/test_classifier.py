@@ -33,6 +33,7 @@ def make_config(**overrides) -> Config:
         contact_email="test@example.invalid", db_path=Path("unused.db"),
         reupload_ratio_threshold=3.0, reupload_ratio_min_floor=10, reupload_absolute_threshold=150,
         reupload_min_history_days=5, median_window_days=28,
+        reissue_overlap_ratio=0.5,
         ch_advanced_search_url="https://example.invalid/advanced-search/companies",
         ch_raw_dir=Path("raw/companies-house"), ch_sic_codes=["56101"], ch_incorporated_window_days=14,
         ch_page_size=500, ch_request_delay_seconds=0.0, ch_timeout_seconds=1.0, ch_max_retries=1,

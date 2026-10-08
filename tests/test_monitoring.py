@@ -9,6 +9,7 @@ from fsa_pipeline.monitoring import (
     check_canaries,
     check_companies_house_run,
     check_daily_run_completed,
+    check_flagged_diff_runs,
     check_extract_date_staleness,
     check_missing_authorities,
     check_parse_failures,
@@ -30,6 +31,7 @@ def make_config(**overrides) -> Config:
         contact_email="test@example.invalid", db_path=Path("unused.db"),
         reupload_ratio_threshold=3.0, reupload_ratio_min_floor=10, reupload_absolute_threshold=150,
         reupload_min_history_days=5, median_window_days=28,
+        reissue_overlap_ratio=0.5,
         ch_advanced_search_url="https://example.invalid/advanced-search/companies",
         ch_raw_dir=Path("raw/companies-house"), ch_sic_codes=["56101"], ch_incorporated_window_days=14,
         ch_page_size=500, ch_request_delay_seconds=0.0, ch_timeout_seconds=1.0, ch_max_retries=1,
@@ -458,3 +460,33 @@ def test_append_alerts_writes_to_shared_log(tmp_path):
     assert "FIRST ALERT" in content
     assert "SECOND ALERT" in content
     assert path.name == f"_alerts_{date_str}.log"
+
+
+def test_flagged_diff_runs_reports_quarantine_and_batch_publication(tmp_path):
+    conn = db.connect(tmp_path / "t.db")
+    db.upsert_authorities(conn, [make_authority("402", "Birmingham"), make_authority("021", "Buckinghamshire")], "2026-10-02")
+    for code, inserts, quarantined, batch, overlap in (("402", 216, 0, 1, 0.05), ("021", 3162, 1, 0, 0.995)):
+        conn.execute(
+            "INSERT INTO diff_runs (authority_code, collection_date, insert_count, update_count, delete_count, "
+            "quarantined, computed_at, batch_publication, reissue_overlap) VALUES (?, '2026-10-02', ?, 0, 170, ?, 't', ?, ?)",
+            (code, inserts, quarantined, batch, overlap),
+        )
+    conn.commit()
+
+    results = check_flagged_diff_runs(conn, "2026-10-02")
+
+    kinds = {message.split(" ")[0]: kind for kind, message in results}
+    assert kinds == {"021": "QUARANTINED RUN", "402": "BATCH PUBLICATION"}
+    assert "excluded from the feed" in results[0][1]
+
+
+def test_flagged_diff_runs_silent_for_clean_day(tmp_path):
+    conn = db.connect(tmp_path / "t.db")
+    db.upsert_authorities(conn, [make_authority("402", "Birmingham")], "2026-10-02")
+    conn.execute(
+        "INSERT INTO diff_runs (authority_code, collection_date, insert_count, update_count, delete_count, "
+        "quarantined, computed_at) VALUES ('402', '2026-10-02', 3, 0, 0, 0, 't')"
+    )
+    conn.commit()
+
+    assert check_flagged_diff_runs(conn, "2026-10-02") == []

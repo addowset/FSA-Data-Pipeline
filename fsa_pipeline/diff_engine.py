@@ -44,6 +44,8 @@ class DiffResult:
     delete_fhrsids: list[int]
     quarantined: bool
     quarantine_reason: str | None
+    batch_publication: bool = False
+    reissue_overlap: float | None = None
 
     @property
     def insert_count(self) -> int:
@@ -84,7 +86,45 @@ def _trailing_insert_counts(
     return [r[0] for r in rows]
 
 
+def _normalize_for_overlap(value: str | None) -> str:
+    return "".join(ch for ch in (value or "").lower() if ch.isalnum())
+
+
+def compute_reissue_overlap(
+    conn: sqlite3.Connection, authority_code: str, insert_fhrsids: list[int], delete_fhrsids: list[int],
+) -> float:
+    """Fraction of INSERTs that have a same-day DELETE with the same
+    trading name and postcode (both normalized). A bulk re-upload re-keys
+    the register, so nearly every insert pairs with a delete: measured
+    2026-10-08, Buckinghamshire's 3,162-insert re-issue matched 99.5%,
+    while Birmingham's and Manchester's batch-publication days matched
+    4-5%. Uses the bulk post_code only, both sides, so the two are
+    compared like-for-like (live-API backfill hasn't run yet when the
+    diff does). Reads establishments_current, which never deletes a
+    departed record. 0.0 when there are no inserts."""
+    if not insert_fhrsids:
+        return 0.0
+    inserts, deletes = set(insert_fhrsids), set(delete_fhrsids)
+    delete_keys = set()
+    insert_keys = []
+    for fhrsid, name, post_code in conn.execute(
+        "SELECT fhrsid, business_name, post_code FROM establishments_current WHERE authority_code = ?",
+        (authority_code,),
+    ):
+        key = (_normalize_for_overlap(name), _normalize_for_overlap(post_code))
+        if fhrsid in deletes:
+            delete_keys.add(key)
+        if fhrsid in inserts:
+            insert_keys.append(key)
+    if not insert_keys:
+        return 0.0
+    return sum(1 for key in insert_keys if key in delete_keys) / len(insert_keys)
+
+
 def _check_reupload_guard(insert_count: int, trailing_counts: list[int], config: Config) -> tuple[bool, str | None]:
+    """Whether the INSERT count is large enough to look at more closely --
+    since 2026-10-08 a TRIGGER only, not the verdict: see
+    classify_flagged_run, which decides quarantine vs batch publication."""
     if insert_count > config.reupload_absolute_threshold:
         return True, (
             f"insert_count={insert_count} exceeds absolute threshold "
@@ -120,6 +160,27 @@ def _check_reupload_guard(insert_count: int, trailing_counts: list[int], config:
         )
 
     return False, None
+
+
+def classify_flagged_run(
+    overlap: float, trigger_reason: str, config: Config,
+) -> tuple[bool, bool, str]:
+    """(quarantined, batch_publication, reason) for a run the size guard
+    flagged. At or above config.reissue_overlap_ratio it's a re-issue:
+    quarantined. Below, it's an authority publishing a large batch of
+    real registrations (backlog accumulated since its last publication,
+    so true registration dates are unknown): kept in the feed but
+    flagged batch_publication."""
+    if overlap >= config.reissue_overlap_ratio:
+        return True, False, (
+            f"{trigger_reason}; {overlap:.0%} of inserts match a same-day delete by name and "
+            f"postcode (>= {config.reissue_overlap_ratio:.0%}) -- looks like a bulk re-issue"
+        )
+    return False, True, (
+        f"{trigger_reason}; only {overlap:.0%} of inserts match a same-day delete by name and "
+        f"postcode (< {config.reissue_overlap_ratio:.0%}) -- looks like a batch publication of "
+        f"real registrations, not a re-issue; registration timing unknown"
+    )
 
 
 def compute_diff_for_authority(
@@ -171,7 +232,12 @@ def compute_diff_for_authority(
     ]
 
     trailing_counts = _trailing_insert_counts(conn, authority_code, collection_date, config.median_window_days)
-    quarantined, reason = _check_reupload_guard(len(insert_fhrsids), trailing_counts, config)
+    triggered, trigger_reason = _check_reupload_guard(len(insert_fhrsids), trailing_counts, config)
+
+    quarantined, batch_publication, reason, overlap = False, False, None, None
+    if triggered:
+        overlap = compute_reissue_overlap(conn, authority_code, insert_fhrsids, delete_fhrsids)
+        quarantined, batch_publication, reason = classify_flagged_run(overlap, trigger_reason, config)
 
     return DiffResult(
         previous_collection_date=prev_date,
@@ -180,7 +246,30 @@ def compute_diff_for_authority(
         delete_fhrsids=delete_fhrsids,
         quarantined=quarantined,
         quarantine_reason=reason,
+        batch_publication=batch_publication,
+        reissue_overlap=overlap,
     )
+
+
+def apply_run_flags(
+    conn: sqlite3.Connection, authority_code: str, collection_date: str,
+    quarantined: bool, batch_publication: bool, reason: str, overlap: float,
+) -> None:
+    """Rewrites an already-recorded run's verdict, and the quarantined
+    flag on that run's INSERT events to match. Used by
+    scripts/reevaluate_quarantines.py; the normal path goes through
+    record_diff."""
+    conn.execute(
+        "UPDATE diff_runs SET quarantined = ?, batch_publication = ?, reissue_overlap = ?, "
+        "quarantine_reason = ? WHERE authority_code = ? AND collection_date = ?",
+        (int(quarantined), int(batch_publication), overlap, reason, authority_code, collection_date),
+    )
+    conn.execute(
+        "UPDATE diff_events SET quarantined = ? "
+        "WHERE authority_code = ? AND collection_date = ? AND event_type = 'INSERT'",
+        (int(quarantined), authority_code, collection_date),
+    )
+    conn.commit()
 
 
 def already_diffed(conn: sqlite3.Connection, authority_code: str, collection_date: str) -> bool:
@@ -198,8 +287,9 @@ def record_diff(
         """
         INSERT INTO diff_runs
             (authority_code, collection_date, previous_collection_date,
-             insert_count, update_count, delete_count, quarantined, quarantine_reason, computed_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             insert_count, update_count, delete_count, quarantined, quarantine_reason, computed_at,
+             batch_publication, reissue_overlap)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(authority_code, collection_date) DO UPDATE SET
             previous_collection_date = excluded.previous_collection_date,
             insert_count = excluded.insert_count,
@@ -207,12 +297,15 @@ def record_diff(
             delete_count = excluded.delete_count,
             quarantined = excluded.quarantined,
             quarantine_reason = excluded.quarantine_reason,
-            computed_at = excluded.computed_at
+            computed_at = excluded.computed_at,
+            batch_publication = excluded.batch_publication,
+            reissue_overlap = excluded.reissue_overlap
         """,
         (
             authority_code, collection_date, result.previous_collection_date,
             result.insert_count, result.update_count, result.delete_count,
             int(result.quarantined), result.quarantine_reason, computed_at,
+            int(result.batch_publication), result.reissue_overlap,
         ),
     )
 

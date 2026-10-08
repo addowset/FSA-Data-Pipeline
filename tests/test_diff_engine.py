@@ -3,7 +3,13 @@ from pathlib import Path
 
 from fsa_pipeline import db
 from fsa_pipeline.config import Config
-from fsa_pipeline.diff_engine import compute_diff_for_authority, record_diff
+from fsa_pipeline.diff_engine import (
+    apply_run_flags,
+    classify_flagged_run,
+    compute_diff_for_authority,
+    compute_reissue_overlap,
+    record_diff,
+)
 
 AUTHORITY = "857"
 
@@ -24,6 +30,7 @@ def make_config(**overrides) -> Config:
         reupload_absolute_threshold=150,
         reupload_min_history_days=5,
         median_window_days=28,
+        reissue_overlap_ratio=0.5,
         ch_advanced_search_url="https://example.invalid/advanced-search/companies",
         ch_raw_dir=Path("raw/companies-house"),
         ch_sic_codes=["56101"],
@@ -64,11 +71,11 @@ def make_config(**overrides) -> Config:
     return dataclasses.replace(base, **overrides)
 
 
-def make_establishment(fhrsid, rating_value="4"):
+def make_establishment(fhrsid, rating_value="4", name=None):
     return {
         "fhrsid": fhrsid,
         "local_authority_business_id": "LA-1",
-        "business_name": f"Establishment {fhrsid}",
+        "business_name": name or f"Establishment {fhrsid}",
         "business_type": "Restaurant/Cafe/Canteen",
         "business_type_id": 1,
         "address_line_1": "1 High Street",
@@ -188,7 +195,10 @@ def test_reupload_guard_trips_on_absolute_threshold(tmp_path):
 
     result = compute_diff_for_authority(conn, AUTHORITY, "2026-08-21", make_config(reupload_absolute_threshold=5))
 
-    assert result.quarantined
+    # Large insert day, but nothing was deleted -- not a re-issue.
+    assert result.batch_publication
+    assert not result.quarantined
+    assert result.reissue_overlap == 0.0
     assert "absolute threshold" in result.quarantine_reason
 
 
@@ -223,7 +233,8 @@ def test_reupload_guard_trips_on_ratio_with_enough_history(tmp_path):
     collect_and_parse(conn, AUTHORITY, "2026-08-20", spike_ests)
     result = compute_diff_for_authority(conn, AUTHORITY, "2026-08-20", config)
 
-    assert result.quarantined
+    assert result.batch_publication
+    assert not result.quarantined
     assert "trailing median" in result.quarantine_reason
 
 
@@ -286,7 +297,7 @@ def test_reupload_guard_zero_trailing_median_still_enforces_absolute_threshold(t
     collect_and_parse(conn, AUTHORITY, "2026-08-20", batch)
     result = compute_diff_for_authority(conn, AUTHORITY, "2026-08-20", config)
 
-    assert result.quarantined
+    assert result.batch_publication and not result.quarantined
     assert "absolute threshold" in result.quarantine_reason
 
 
@@ -317,3 +328,104 @@ def test_record_diff_writes_events_and_is_overwritable(tmp_path):
         (AUTHORITY, "2026-08-21"),
     ).fetchone()[0]
     assert count == 1
+
+
+# --- re-issue test (2026-10-08): size trips the guard, overlap decides ---
+
+def reissue_scenario(conn, count, keep_names=True):
+    """Day 1: `count` establishments. Day 2: every one re-keyed under a new
+    FHRSID (same name and postcode if keep_names) -- the shape of a real
+    bulk re-issue: `count` inserts and `count` deletes."""
+    collect_and_parse(conn, AUTHORITY, "2026-08-20", [make_establishment(i) for i in range(1, count + 1)])
+    collect_and_parse(conn, AUTHORITY, "2026-08-21", [
+        make_establishment(1000 + i, name=f"Establishment {i}" if keep_names else None)
+        for i in range(1, count + 1)
+    ])
+
+
+def test_reissue_is_quarantined(tmp_path):
+    conn = db.connect(tmp_path / "t.db")
+    reissue_scenario(conn, 10)
+
+    result = compute_diff_for_authority(conn, AUTHORITY, "2026-08-21", make_config(reupload_absolute_threshold=5))
+
+    assert result.quarantined
+    assert not result.batch_publication
+    assert result.reissue_overlap == 1.0
+    assert "bulk re-issue" in result.quarantine_reason
+
+
+def test_rekeyed_under_different_names_is_not_a_reissue(tmp_path):
+    conn = db.connect(tmp_path / "t.db")
+    reissue_scenario(conn, 10, keep_names=False)
+
+    result = compute_diff_for_authority(conn, AUTHORITY, "2026-08-21", make_config(reupload_absolute_threshold=5))
+
+    assert result.batch_publication and not result.quarantined
+    assert result.reissue_overlap == 0.0
+
+
+def test_no_flag_when_guard_does_not_trigger(tmp_path):
+    conn = db.connect(tmp_path / "t.db")
+    collect_and_parse(conn, AUTHORITY, "2026-08-20", [])
+    collect_and_parse(conn, AUTHORITY, "2026-08-21", [make_establishment(1)])
+
+    result = compute_diff_for_authority(conn, AUTHORITY, "2026-08-21", make_config())
+
+    assert not result.quarantined and not result.batch_publication
+    assert result.reissue_overlap is None
+
+
+def test_classify_flagged_run_boundary_is_inclusive():
+    config = make_config(reissue_overlap_ratio=0.5)
+
+    assert classify_flagged_run(0.5, "trigger", config)[:2] == (True, False)
+    assert classify_flagged_run(0.49, "trigger", config)[:2] == (False, True)
+
+
+def test_compute_reissue_overlap_normalizes_case_and_punctuation(tmp_path):
+    conn = db.connect(tmp_path / "t.db")
+    collect_and_parse(conn, AUTHORITY, "2026-08-20", [make_establishment(1, name="The Cafe")])
+    collect_and_parse(conn, AUTHORITY, "2026-08-21", [make_establishment(2, name="THE  CAFE!")])
+
+    assert compute_reissue_overlap(conn, AUTHORITY, [2], [1]) == 1.0
+
+
+def test_compute_reissue_overlap_partial(tmp_path):
+    conn = db.connect(tmp_path / "t.db")
+    collect_and_parse(conn, AUTHORITY, "2026-08-20", [make_establishment(1, name="A"), make_establishment(2, name="B")])
+    collect_and_parse(conn, AUTHORITY, "2026-08-21", [make_establishment(3, name="A"), make_establishment(4, name="Z")])
+
+    assert compute_reissue_overlap(conn, AUTHORITY, [3, 4], [1, 2]) == 0.5
+
+
+def test_compute_reissue_overlap_zero_with_no_inserts(tmp_path):
+    conn = db.connect(tmp_path / "t.db")
+    assert compute_reissue_overlap(conn, AUTHORITY, [], [1, 2]) == 0.0
+
+
+def test_record_diff_stores_batch_flag_and_leaves_events_unquarantined(tmp_path):
+    conn = db.connect(tmp_path / "t.db")
+    collect_and_parse(conn, AUTHORITY, "2026-08-20", [])
+    collect_and_parse(conn, AUTHORITY, "2026-08-21", [make_establishment(i) for i in range(1, 11)])
+    result = compute_diff_for_authority(conn, AUTHORITY, "2026-08-21", make_config(reupload_absolute_threshold=5))
+
+    record_diff(conn, AUTHORITY, "2026-08-21", result, "t")
+
+    run = conn.execute("SELECT quarantined, batch_publication, reissue_overlap FROM diff_runs").fetchone()
+    assert run == (0, 1, 0.0)
+    assert conn.execute("SELECT COUNT(*) FROM diff_events WHERE event_type='INSERT' AND quarantined=0").fetchone()[0] == 10
+
+
+def test_apply_run_flags_unquarantines_inserts_only(tmp_path):
+    conn = db.connect(tmp_path / "t.db")
+    reissue_scenario(conn, 10)
+    result = compute_diff_for_authority(conn, AUTHORITY, "2026-08-21", make_config(reupload_absolute_threshold=5))
+    record_diff(conn, AUTHORITY, "2026-08-21", result, "t")
+    assert conn.execute("SELECT quarantined FROM diff_runs").fetchone() == (1,)
+
+    apply_run_flags(conn, AUTHORITY, "2026-08-21", False, True, "reason", 0.04)
+
+    assert conn.execute("SELECT quarantined, batch_publication, reissue_overlap, quarantine_reason FROM diff_runs").fetchone() == (0, 1, 0.04, "reason")
+    assert conn.execute("SELECT COUNT(*) FROM diff_events WHERE event_type='INSERT' AND quarantined=1").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM diff_events WHERE event_type='DELETE'").fetchone()[0] == 10

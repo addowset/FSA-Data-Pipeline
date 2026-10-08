@@ -45,6 +45,7 @@ class Config:
     reupload_absolute_threshold: int
     reupload_min_history_days: int
     median_window_days: int
+    reissue_overlap_ratio: float
     ch_advanced_search_url: str
     ch_raw_dir: Path
     ch_sic_codes: list[str]
@@ -131,6 +132,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         reupload_absolute_threshold=int(diffing["reupload_absolute_threshold"]),
         reupload_min_history_days=int(diffing["reupload_min_history_days"]),
         median_window_days=int(diffing["median_window_days"]),
+        reissue_overlap_ratio=float(diffing["reissue_overlap_ratio"]),
         ch_advanced_search_url=companies_house["advanced_search_url"],
         ch_raw_dir=PROJECT_ROOT / companies_house["raw_dir"],
         ch_sic_codes=list(companies_house["sic_codes"]),

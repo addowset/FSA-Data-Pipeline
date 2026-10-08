@@ -59,6 +59,7 @@ def run(date_str: str, force: bool) -> int:
     already_count = 0
     bootstrap_count = 0
     quarantined_count = 0
+    batch_count = 0
     total_insert = total_update = total_delete = 0
 
     for i, authority_code in enumerate(authority_codes, start=1):
@@ -84,6 +85,9 @@ def run(date_str: str, force: bool) -> int:
         if result.quarantined:
             quarantined_count += 1
             flag = f" [QUARANTINED: {result.quarantine_reason}]"
+        elif result.batch_publication:
+            batch_count += 1
+            flag = f" [BATCH PUBLICATION: {result.quarantine_reason}]"
 
         logger.info(
             "[%d/%d] %s: %d insert, %d update, %d delete (vs %s)%s",
@@ -93,9 +97,9 @@ def run(date_str: str, force: bool) -> int:
         )
 
     logger.info(
-        "done: %d diffed, %d bootstrap (skipped), %d already diffed, %d quarantined; "
+        "done: %d diffed, %d bootstrap (skipped), %d already diffed, %d quarantined, %d batch publication; "
         "%d insert, %d update, %d delete",
-        diffed_count, bootstrap_count, already_count, quarantined_count,
+        diffed_count, bootstrap_count, already_count, quarantined_count, batch_count,
         total_insert, total_update, total_delete,
     )
 

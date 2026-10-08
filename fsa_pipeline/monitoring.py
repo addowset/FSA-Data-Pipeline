@@ -355,6 +355,41 @@ def check_canaries(conn: sqlite3.Connection) -> list[str]:
     return alerts
 
 
+def check_flagged_diff_runs(conn: sqlite3.Connection, collection_date: str) -> list[tuple[str, str]]:
+    """(kind, message) for every authority run on collection_date that the
+    diff's size guard flagged: kind is "QUARANTINED RUN" (a suspected bulk
+    re-issue, excluded from the feed) or "BATCH PUBLICATION" (a large
+    insert day that is NOT a re-issue, kept in the feed but with unknown
+    registration timing). Added 2026-10-08: before this, a quarantine
+    was only visible as a line in that day's fhrs_diff log, and the two
+    biggest city authorities went unnoticed for weeks."""
+    rows = conn.execute(
+        "SELECT d.authority_code, a.name, d.insert_count, d.delete_count, d.quarantined, "
+        "d.batch_publication, d.reissue_overlap "
+        "FROM diff_runs d JOIN authorities a ON a.code = d.authority_code "
+        "WHERE d.collection_date = ? AND (d.quarantined = 1 OR d.batch_publication = 1) "
+        "ORDER BY d.insert_count DESC",
+        (collection_date,),
+    ).fetchall()
+    results = []
+    for code, name, inserts, deletes, quarantined, batch, overlap in rows:
+        pct = "n/a" if overlap is None else f"{overlap:.0%}"
+        if quarantined:
+            results.append((
+                "QUARANTINED RUN",
+                f"{code} ({name}): {inserts} inserts / {deletes} deletes, {pct} of inserts match a "
+                f"same-day delete -- treated as a bulk re-issue and excluded from the feed",
+            ))
+        else:
+            results.append((
+                "BATCH PUBLICATION",
+                f"{code} ({name}): {inserts} inserts / {deletes} deletes, only {pct} match a same-day "
+                f"delete -- not a re-issue; included in the feed but registration timing is unknown "
+                f"(a batch of accumulated registrations, not one day's)",
+            ))
+    return results
+
+
 def check_daily_run_completed(log_dir: Path, date_str: str) -> tuple[bool, str | None]:
     """Whether today's scheduled run reached its last stage at all. See
     module docstring for why this can't be answered from the database

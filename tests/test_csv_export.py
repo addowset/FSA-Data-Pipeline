@@ -450,3 +450,27 @@ def test_fetch_records_authority_extract_date_is_most_recent(tmp_path):
     records = fetch_records(conn)
 
     assert records[0]["authority_extract_date"] == "2026-08-25"
+
+
+def test_fetch_records_flags_batch_publication_runs_and_still_includes_them(tmp_path):
+    conn = db.connect(tmp_path / "t.db")
+    setup_insert_event(conn, 1, collection_date="2026-08-25")
+    setup_insert_event(conn, 2, collection_date="2026-08-26")
+    conn.execute(
+        "INSERT INTO diff_runs (authority_code, collection_date, insert_count, update_count, delete_count, "
+        "quarantined, computed_at, batch_publication) VALUES (?, '2026-08-26', 300, 0, 0, 0, 't', 1)",
+        (AUTHORITY,),
+    )
+    conn.commit()
+
+    records = {r["fhrsid"]: r for r in fetch_records(conn)}
+
+    assert set(records) == {1, 2}
+    assert records[1]["batch_publication"] == 0
+    assert records[2]["batch_publication"] == 1
+
+
+def test_build_row_batch_publication_column():
+    assert build_row(make_full_record(batch_publication=1))["batch_publication"] == "Yes"
+    assert build_row(make_full_record(batch_publication=0))["batch_publication"] == "No"
+    assert build_row(make_full_record())["batch_publication"] == "No"

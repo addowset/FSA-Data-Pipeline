@@ -8,6 +8,13 @@ guard, fsa_pipeline/diff_engine.py) are always excluded: they're a
 suspected data artefact, never real signal, and this export is exactly
 the point where sending one to a customer would do real damage.
 
+Rows from a batch-publication run (diff_engine.py's classify_flagged_run:
+a large INSERT day that is NOT a re-issue -- an authority publishing
+accumulated real registrations in one go) are included, with
+`batch_publication` = Yes. Their first_seen_date is the day the
+authority published them, not the day the venue registered, so
+days_since_first_seen understates their true age. Added 2026-10-08.
+
 Also always excluded: an establishment whose business_name contains
 "closed" (case-insensitive). Real case found 2026-09-11 reviewing a
 Highland records: councils sometimes annotate a closure directly in the
@@ -118,6 +125,7 @@ EXPORT_FIELDNAMES = [
     "rating_status",
     "first_seen_date",
     "days_since_first_seen",
+    "batch_publication",
     "classification",
     "confidence",
     "reason",
@@ -298,6 +306,7 @@ def build_row(record: dict) -> dict:
         "rating_status": rating_status(record["rating_value"]),
         "first_seen_date": record["first_seen_date"],
         "days_since_first_seen": days_since_first_seen(record["first_seen_date"]),
+        "batch_publication": "Yes" if record.get("batch_publication") else "No",
         "classification": record["classification"],
         "confidence": record["confidence"],
         "reason": customer_reason(record),
@@ -347,13 +356,16 @@ def fetch_records(
                comp.company_name, comp.company_status, comp.date_of_creation AS incorporation_date,
                comp.sic_codes,
                prev.business_name AS previous_business_name, prev.fhrsid AS previous_fhrsid,
-               prev.last_seen_date AS previous_last_seen
+               prev.last_seen_date AS previous_last_seen,
+               COALESCE(dr.batch_publication, 0) AS batch_publication
         FROM classifications c
         JOIN establishments_current e ON e.fhrsid = c.fhrsid
         JOIN authorities a ON a.code = e.authority_code
         JOIN diff_events d
           ON d.fhrsid = c.fhrsid AND d.collection_date = c.insert_collection_date
              AND d.authority_code = c.authority_code AND d.event_type = 'INSERT'
+        LEFT JOIN diff_runs dr
+          ON dr.authority_code = d.authority_code AND dr.collection_date = d.collection_date
         LEFT JOIN companies_current comp ON comp.company_number = c.evidence_company_number
         LEFT JOIN establishments_current prev ON prev.fhrsid = c.evidence_predecessor_fhrsid
         WHERE d.quarantined = 0

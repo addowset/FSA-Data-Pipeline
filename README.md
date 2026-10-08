@@ -700,6 +700,15 @@ Idempotent, same resume behaviour as the other scripts. An authority's
 first-ever successful collection has no prior snapshot to diff against,
 so it's skipped with no events emitted (not treated as a mass INSERT).
 
+A large INSERT day (over 150, or over 3x the trailing median) is checked
+against the re-issue test before it's excluded: if at least
+`[diffing].reissue_overlap_ratio` (50%) of the inserts match a same-day
+delete by trading name and postcode it's a bulk re-issue and is
+**quarantined**; otherwise it's a **batch publication** — kept in the feed
+and flagged. `python scripts/reevaluate_quarantines.py` (dry-run; `--apply`
+writes) re-applies that test to runs quarantined under the old size-only
+rule. See "Design notes".
+
 ## Running Companies House collection
 
 Part of the daily scheduled run (`run_daily.ps1`) as of 2026-08-24. To
@@ -1826,6 +1835,38 @@ and confirms the lookup still finds it.
   those too). They surface in the usual `_review_queue_<date>.log` as
   `NEW_VENUE`/`MEDIUM`. An `UNKNOWN` older than 90 days is never
   rechecked.
+
+- **Quarantine now tests for a re-issue, not just size, 2026-10-08.**
+  The bulk-reupload guard existed to stop an authority re-keying its
+  register from flooding the feed with years-old venues as "new". It
+  measured size (a flat 150 inserts, or 3x a trailing median that is 0
+  for quiet authorities), so the two largest register-holders tripped it
+  on legitimate batch days while small ones never could: Birmingham had 2
+  rows in the feed (10,982 establishments) and Manchester 10, because
+  436/205/216 and 404-insert days were quarantined. Checked against the
+  data (a second chat flagged it; its run attribution was partly wrong --
+  the 3,162 was Buckinghamshire): a true re-issue pairs nearly every
+  insert with a same-day delete of the same name and postcode
+  (Buckinghamshire 99.6%), while Birmingham's and Manchester's days
+  paired 3-6%, 80-90% were `AwaitingInspection`, and they were
+  classified normally -- the export just excluded them. Now the size
+  checks only *trigger* a closer look (`compute_reissue_overlap` /
+  `classify_flagged_run` in `diff_engine.py`): overlap >= 50% is
+  quarantined as before; below that the run is a **batch publication**
+  (`diff_runs.batch_publication`, `reissue_overlap`), not quarantined,
+  exported with `batch_publication = Yes`. Caveat carried into the
+  export: these are accumulated registrations published at once
+  (Birmingham: ~8% of its register in six weeks vs Leeds ~1.6%), so
+  `first_seen_date` is the publication day, not the registration day, and
+  `days_since_first_seen` understates age. Any quarantined or batch run
+  now raises a `QUARANTINED RUN` / `BATCH PUBLICATION` alert
+  (`monitoring.check_flagged_diff_runs`) into the daily email; before,
+  it only appeared in that day's `fhrs_diff` log. The four affected runs
+  were backfilled with `scripts/reevaluate_quarantines.py --apply`:
+  Birmingham 3, Manchester 1 un-quarantined (778 and 364 export rows),
+  Buckinghamshire stays quarantined. The supplier-coverage workbook
+  from the other chat needs regenerating from a fresh export to pick
+  these up; its "red = territory includes B or M" rows will change.
 
 ## Data licensing
 

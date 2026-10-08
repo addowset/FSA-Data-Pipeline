@@ -142,6 +142,8 @@ CREATE TABLE IF NOT EXISTS diff_runs (
     quarantined INTEGER NOT NULL DEFAULT 0,
     quarantine_reason TEXT,
     computed_at TEXT NOT NULL,
+    batch_publication INTEGER NOT NULL DEFAULT 0,
+    reissue_overlap REAL,
     UNIQUE(authority_code, collection_date)
 );
 
@@ -400,6 +402,17 @@ _COMPANY_OBSERVATIONS_MIGRATIONS = {
 }
 
 
+# Added 2026-10-08 for the re-issue test (fsa_pipeline/diff_engine.py).
+# batch_publication: the INSERT count tripped the size guard but the run
+# is NOT a re-issue (few inserts match same-day deletes), so it stays in
+# the feed, flagged. reissue_overlap: that measured fraction (NULL when
+# the guard never triggered, or for runs recorded before this existed).
+_DIFF_RUNS_MIGRATIONS = {
+    "batch_publication": "INTEGER NOT NULL DEFAULT 0",
+    "reissue_overlap": "REAL",
+}
+
+
 def _ensure_columns(conn: sqlite3.Connection, table: str, columns: dict) -> None:
     existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
     for name, sql_type in columns.items():
@@ -425,6 +438,7 @@ def connect(db_path: Path) -> sqlite3.Connection:
     _ensure_columns(conn, "establishments_current", _ESTABLISHMENTS_CURRENT_MIGRATIONS)
     _ensure_columns(conn, "company_match_candidates", _COMPANY_MATCH_CANDIDATES_MIGRATIONS)
     _ensure_columns(conn, "classifications", _CLASSIFICATIONS_MIGRATIONS)
+    _ensure_columns(conn, "diff_runs", _DIFF_RUNS_MIGRATIONS)
     _ensure_columns(conn, "companies_current", _COMPANIES_CURRENT_MIGRATIONS)
     _ensure_columns(conn, "company_observations", _COMPANY_OBSERVATIONS_MIGRATIONS)
     return conn

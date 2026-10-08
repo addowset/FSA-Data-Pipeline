@@ -79,6 +79,17 @@ reupload_ratio_min_floor = 10
 reupload_absolute_threshold = 150
 reupload_min_history_days = 5
 median_window_days = 28
+# Re-issue test, added 2026-10-08. The size checks above only TRIGGER a
+# closer look; they no longer decide. A real bulk re-upload re-keys the
+# whole register, so nearly every INSERT has a same-day DELETE with the
+# same trading name and postcode: measured against the five runs ever
+# flagged, Buckinghamshire's 3,162 matched 99.5% (a true re-issue),
+# while Birmingham's (436/205/216) and Manchester's (404) matched only
+# 4-5% -- an authority publishing a batch of real registrations, not
+# re-uploading. At or above this fraction of inserts matched by name and
+# postcode the run is quarantined; below it the run is flagged
+# batch_publication instead (kept in the feed, exported with a flag).
+reissue_overlap_ratio = 0.5
 
 [matching]
 # Companies sharing a registered-office address with this many or more

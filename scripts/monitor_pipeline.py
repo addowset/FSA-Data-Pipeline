@@ -124,6 +124,9 @@ def collect_alerts(config, conn, date_str: str) -> list[str]:
     for reason in monitoring.check_canaries(conn):
         alerts.append(f"CANARY: {reason}")
 
+    for kind, message in monitoring.check_flagged_diff_runs(conn, date_str):
+        alerts.append(f"{kind}: {message}")
+
     return alerts
 
 
