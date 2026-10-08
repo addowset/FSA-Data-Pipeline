@@ -23,6 +23,18 @@ authority whose raw file was never fetched leaves ZERO trace in
 collection_runs (not even a failure row) -- see check_missing_authorities,
 which cross-references the full authorities table instead of only
 scanning collection_runs for bad rows.
+
+check_daily_run_completed is the one deliberate exception to "reads only
+the database": every check above only runs at all if monitor_pipeline.py
+itself runs, which only happens if run_daily.ps1 reaches its last stage
+-- so none of them can ever detect the day run_daily.ps1 never started
+in the first place (confirmed 2026-09-30: the machine was asleep through
+the scheduled 11:00 trigger, so nothing downstream ran, including every
+check in this file). check_daily_run_completed reads log file presence
+instead, since that's the one thing guaranteed to exist independently of
+whether the pipeline itself ever wrote to the database -- see
+scripts/check_daily_run.py, registered as its own separate scheduled
+task so it isn't downstream of the same failure it's checking for.
 """
 
 from __future__ import annotations
@@ -30,6 +42,7 @@ from __future__ import annotations
 import datetime as dt
 import sqlite3
 import statistics
+from pathlib import Path
 
 from fsa_pipeline.canaries import CANARIES
 from fsa_pipeline.config import Config
@@ -340,3 +353,45 @@ def check_canaries(conn: sqlite3.Connection) -> list[str]:
         if mismatches:
             alerts.append(f"canary FHRSID {canary.fhrsid}: {'; '.join(mismatches)}")
     return alerts
+
+
+def check_daily_run_completed(log_dir: Path, date_str: str) -> tuple[bool, str | None]:
+    """Whether today's scheduled run reached its last stage at all. See
+    module docstring for why this can't be answered from the database
+    like every other check here. fhrs_collect's log marks the first
+    stage of run_daily.ps1, monitor_pipeline's marks the last -- their
+    presence or absence distinguishes "never started" from "started but
+    didn't finish" (crashed, still running past its normal window, or
+    killed)."""
+    started = (log_dir / f"fhrs_collect_{date_str}.log").exists()
+    completed = (log_dir / f"monitor_pipeline_{date_str}.log").exists()
+
+    if completed:
+        return False, None
+
+    if started:
+        return True, (
+            f"fhrs_collect_{date_str}.log exists but monitor_pipeline_{date_str}.log "
+            f"does not -- the scheduled run started today but never reached its last "
+            f"stage (crashed, still running past its normal window, or was killed)"
+        )
+
+    return True, (
+        f"no fhrs_collect_{date_str}.log by this check -- today's scheduled task "
+        f"appears not to have fired at all (check Task Scheduler's last/next run "
+        f"time and missed-run count for 'FSA Data Pipeline Daily', and whether the "
+        f"machine was asleep)"
+    )
+
+
+def append_alerts(log_dir: Path, date_str: str, alerts: list[str]) -> Path:
+    """Appends to logs/_alerts_<date>.log, same format regardless of
+    which script is doing the appending -- monitor_pipeline.py and
+    check_daily_run.py both write into one place, so there's a single
+    log to check for either kind of problem."""
+    alerts_path = log_dir / f"_alerts_{date_str}.log"
+    with open(alerts_path, "a", encoding="utf-8") as f:
+        f.write(f"--- run at {dt.datetime.now(dt.timezone.utc).isoformat()} ---\n")
+        for alert in alerts:
+            f.write(f"{alert}\n")
+    return alerts_path

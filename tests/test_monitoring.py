@@ -5,8 +5,10 @@ from fsa_pipeline import db
 from fsa_pipeline.config import Config
 from fsa_pipeline.fhrs_bulk import Authority
 from fsa_pipeline.monitoring import (
+    append_alerts,
     check_canaries,
     check_companies_house_run,
+    check_daily_run_completed,
     check_extract_date_staleness,
     check_missing_authorities,
     check_parse_failures,
@@ -39,6 +41,7 @@ def make_config(**overrides) -> Config:
         new_venue_high_threshold=0.85, new_venue_medium_threshold=0.6,
         new_venue_max_incorporation_age_days=180, address_history_fallback_threshold=0.9,
         multi_venue_company_threshold=5,
+        new_venue_late_incorporation_window_days=90, unknown_recheck_window_days=90,
         officer_churn_enabled=False, officer_churn_window_days=60, officer_churn_request_delay_seconds=0.0,
         operator_search_recheck_after_days=30,
         monitoring_staleness_ratio=3.0, monitoring_staleness_min_age_days=10,
@@ -47,6 +50,8 @@ def make_config(**overrides) -> Config:
         monitoring_record_count_min_history_days=5, monitoring_record_count_min_floor=10,
         monitoring_max_skipped_record_ratio=0.01,
         export_output_dir=Path("exports"),
+        alerting_enabled=True, alerting_recipient_email="test@example.invalid",
+        alerting_smtp_host="smtp.example.invalid", alerting_smtp_port=587,
     )
     return dataclasses.replace(base, **overrides)
 
@@ -410,3 +415,46 @@ def test_canaries_flags_business_name_mismatch(tmp_path):
     matching = [a for a in alerts if str(canary.fhrsid) in a]
     assert len(matching) == 1
     assert "business_name" in matching[0]
+
+
+def test_daily_run_completed_is_silent_when_monitor_log_present(tmp_path):
+    date_str = "2026-09-30"
+    (tmp_path / f"fhrs_collect_{date_str}.log").write_text("x", encoding="utf-8")
+    (tmp_path / f"monitor_pipeline_{date_str}.log").write_text("x", encoding="utf-8")
+
+    problem, reason = check_daily_run_completed(tmp_path, date_str)
+
+    assert problem is False
+    assert reason is None
+
+
+def test_daily_run_completed_flags_run_that_never_started(tmp_path):
+    date_str = "2026-09-30"
+
+    problem, reason = check_daily_run_completed(tmp_path, date_str)
+
+    assert problem is True
+    assert "not to have fired" in reason
+    assert "fhrs_collect" in reason
+
+
+def test_daily_run_completed_flags_run_that_started_but_did_not_finish(tmp_path):
+    date_str = "2026-09-30"
+    (tmp_path / f"fhrs_collect_{date_str}.log").write_text("x", encoding="utf-8")
+
+    problem, reason = check_daily_run_completed(tmp_path, date_str)
+
+    assert problem is True
+    assert "never reached its last stage" in reason
+
+
+def test_append_alerts_writes_to_shared_log(tmp_path):
+    date_str = "2026-09-30"
+
+    path = append_alerts(tmp_path, date_str, ["FIRST ALERT"])
+    append_alerts(tmp_path, date_str, ["SECOND ALERT"])
+
+    content = path.read_text(encoding="utf-8")
+    assert "FIRST ALERT" in content
+    assert "SECOND ALERT" in content
+    assert path.name == f"_alerts_{date_str}.log"

@@ -12,8 +12,13 @@ Per the project brief:
 - NEW_VENUE: matched to a company (stage 4's matcher) incorporated
   recently relative to this record's first-seen date, with no
   address-history predecessor.
+  A company incorporated up to new_venue_late_incorporation_window_days
+  AFTER the venue first appeared also qualifies, capped at MEDIUM
+  (_incorporated_late, added 2026-10-07).
 - UNKNOWN: neither of the above. Not discarded -- many independent
-  cafés never incorporate.
+  cafés never incorporate. Recent UNKNOWNs are rematched and
+  reclassified daily (--recheck-unknown) so a later-registered company
+  can still upgrade them.
 
 Two bugs caught during design (2026-08-27/28, ground-truth spot checks),
 before this logic shipped:
@@ -251,6 +256,28 @@ def _incorporation_recency(date_of_creation: str | None, first_seen_date: str, m
     return 0 <= age_days <= max_age_days
 
 
+def _incorporated_late(date_of_creation: str | None, first_seen_date: str, late_window_days: int) -> bool:
+    """True if the company was incorporated AFTER the FHRS record first
+    appeared, by at most late_window_days. Added 2026-10-07: before this,
+    a negative age fell through _incorporation_recency as "not recent" and
+    the event stayed UNKNOWN. Measured against real UNKNOWNs that this
+    mattered for 31 of 12,799 -- freshly-registered companies, 1-41 days
+    after the venue's FHRS record, found by Companies House data that
+    arrived after matching first ran. Kept separate from
+    _incorporation_recency (rather than widening its range) because
+    OPERATOR_CHANGE also stores that result, and because the caller caps
+    confidence differently for this case: a late company is also what a
+    sole trader incorporating an existing business looks like."""
+    if not date_of_creation:
+        return False
+    try:
+        created = dt.date.fromisoformat(date_of_creation)
+        first_seen = dt.date.fromisoformat(first_seen_date)
+    except ValueError:
+        return False
+    return 0 < (created - first_seen).days <= late_window_days
+
+
 def _is_corroborating(candidate: Candidate, config: Config) -> bool:
     """A candidate counts as corroborating evidence either via name
     similarity clearing the medium threshold, or via an exact
@@ -399,6 +426,12 @@ def classify(
         # _incorporation_recency's docstring for the real numbers behind
         # this decision (554 of 604 previously-rejected matches had zero
         # multi-site evidence either way).
+        incorporated_late = _incorporated_late(
+            best_candidate.date_of_creation, first_seen_date, config.new_venue_late_incorporation_window_days,
+        )
+        if incorporated_late:
+            recently_incorporated = True  # within the recency window, just on the other side of first-seen
+
         qualifies_as_new_venue = recently_incorporated is True or existing_operator is not None
         if not qualifies_as_new_venue:
             reason = (
@@ -434,12 +467,22 @@ def classify(
         else:
             confidence = "LOW" if (best_candidate.is_high_density_address or is_multi_venue_company) else "MEDIUM"
 
+        if incorporated_late and confidence == "HIGH":
+            confidence = "MEDIUM"
+
         reason = (
             f"Matched Companies House company \"{best_candidate.company_name}\" "
             f"({best_candidate.company_number}), incorporated {best_candidate.date_of_creation or 'at an unknown date'}, "
             f"name similarity {score}, via {best_candidate.match_strategy} search"
             + (f" in postcode district {best_candidate.postcode_district}." if best_candidate.match_strategy == "district" else ".")
         )
+        if incorporated_late:
+            reason += (
+                " This company was incorporated AFTER the venue first appeared in FHRS -- consistent "
+                "with a new venue whose owner incorporated shortly after registering, but also with an "
+                "existing sole trader moving into a limited company, which the data can't distinguish. "
+                "Confidence capped at MEDIUM."
+            )
         if best_candidate.is_high_density_address:
             reason += (
                 f" Registered address is shared by {best_candidate.address_company_count} companies "

@@ -39,10 +39,6 @@ from fsa_pipeline.logging_utils import setup_logger
 MANIFEST_FILENAME = "_manifest.json"
 
 
-def now_iso() -> str:
-    return dt.datetime.now(dt.timezone.utc).isoformat()
-
-
 def load_manifest(config, date_str: str) -> dict | None:
     path = config.raw_dir / date_str / MANIFEST_FILENAME
     if not path.exists():
@@ -131,15 +127,6 @@ def collect_alerts(config, conn, date_str: str) -> list[str]:
     return alerts
 
 
-def write_alerts(config, date_str: str, alerts: list[str]) -> Path:
-    alerts_path = config.log_dir / f"_alerts_{date_str}.log"
-    with open(alerts_path, "a", encoding="utf-8") as f:
-        f.write(f"--- run at {now_iso()} ---\n")
-        for alert in alerts:
-            f.write(f"{alert}\n")
-    return alerts_path
-
-
 def run(date_str: str) -> int:
     config = load_config()
     logger = setup_logger("monitor_pipeline", config.log_dir / f"monitor_pipeline_{date_str}.log")
@@ -151,7 +138,7 @@ def run(date_str: str) -> int:
 
     alerts = collect_alerts(config, conn, date_str)
     if alerts:
-        alerts_path = write_alerts(config, date_str, alerts)
+        alerts_path = monitoring.append_alerts(config.log_dir, date_str, alerts)
         logger.warning("%d alert(s) appended to %s", len(alerts), alerts_path)
         for alert in alerts:
             logger.warning("  %s", alert)

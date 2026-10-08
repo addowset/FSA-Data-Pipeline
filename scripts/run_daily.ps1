@@ -18,6 +18,11 @@
 # COALESCE(post_code, postcode_from_live_api). Classification runs last
 # among the data stages -- it needs both the matcher's evidence and the
 # full establishments_current baseline for its address-history check.
+# Both the matcher and the classifier run with --recheck-unknown (added
+# 2026-10-07): events still UNKNOWN within the last
+# [classification].unknown_recheck_window_days are rematched and
+# reclassified each day, so a company registered with Companies House
+# AFTER the venue appeared in FHRS can still upgrade it to NEW_VENUE.
 # Monitoring (stage 6) runs after that, last of all -- it's a pure
 # reporting/alerting pass over what every earlier stage just wrote, not
 # a failure of its own if something upstream had problems (that's
@@ -48,10 +53,10 @@ $operatorSearchExit = $LASTEXITCODE
 & $python (Join-Path $root "scripts\backfill_postcodes.py")
 $backfillExit = $LASTEXITCODE
 
-& $python (Join-Path $root "scripts\match_companies_house.py")
+& $python (Join-Path $root "scripts\match_companies_house.py") --recheck-unknown
 $matchExit = $LASTEXITCODE
 
-& $python (Join-Path $root "scripts\classify_insertions.py")
+& $python (Join-Path $root "scripts\classify_insertions.py") --recheck-unknown
 $classifyExit = $LASTEXITCODE
 
 & $python (Join-Path $root "scripts\monitor_pipeline.py")

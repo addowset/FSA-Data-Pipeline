@@ -70,6 +70,8 @@ class Config:
     new_venue_max_incorporation_age_days: int
     address_history_fallback_threshold: float
     multi_venue_company_threshold: int
+    new_venue_late_incorporation_window_days: int
+    unknown_recheck_window_days: int
     officer_churn_enabled: bool
     officer_churn_window_days: int
     officer_churn_request_delay_seconds: float
@@ -84,6 +86,10 @@ class Config:
     monitoring_record_count_min_floor: int
     monitoring_max_skipped_record_ratio: float
     export_output_dir: Path
+    alerting_enabled: bool
+    alerting_recipient_email: str
+    alerting_smtp_host: str
+    alerting_smtp_port: int
 
     @property
     def user_agent(self) -> str:
@@ -108,6 +114,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     operator_search = raw["operator_search"]
     monitoring = raw["monitoring"]
     export = raw["export"]
+    alerting = raw["alerting"]
 
     return Config(
         authorities_url=fhrs["authorities_url"],
@@ -149,6 +156,8 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         new_venue_max_incorporation_age_days=int(classification["new_venue_max_incorporation_age_days"]),
         address_history_fallback_threshold=float(classification["address_history_fallback_threshold"]),
         multi_venue_company_threshold=int(classification["multi_venue_company_threshold"]),
+        new_venue_late_incorporation_window_days=int(classification["new_venue_late_incorporation_window_days"]),
+        unknown_recheck_window_days=int(classification["unknown_recheck_window_days"]),
         officer_churn_enabled=bool(officer_churn["enabled"]),
         officer_churn_window_days=int(officer_churn["window_days"]),
         officer_churn_request_delay_seconds=float(officer_churn["request_delay_seconds"]),
@@ -163,4 +172,8 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         monitoring_record_count_min_floor=int(monitoring["record_count_min_floor"]),
         monitoring_max_skipped_record_ratio=float(monitoring["max_skipped_record_ratio"]),
         export_output_dir=PROJECT_ROOT / export["output_dir"],
+        alerting_enabled=bool(alerting["enabled"]),
+        alerting_recipient_email=alerting["recipient_email"],
+        alerting_smtp_host=alerting["smtp_host"],
+        alerting_smtp_port=int(alerting["smtp_port"]),
     )

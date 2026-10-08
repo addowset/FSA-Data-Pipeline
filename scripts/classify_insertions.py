@@ -9,7 +9,11 @@ lookup queries establishments_current, never observations).
 
 Idempotent per (FHRSID, INSERT date). Pass --force to reclassify
 everything (evidence can change as new Companies House data or new
-FHRS establishments arrive).
+FHRS establishments arrive). --recheck-unknown reclassifies only events
+currently UNKNOWN and recent enough ([classification]
+unknown_recheck_window_days in config.toml) -- run daily by run_daily.ps1
+after the matcher's own --recheck-unknown, so a company registered after
+the venue can upgrade it to NEW_VENUE.
 
 Also writes a short review-queue log (_review_queue_<date>.log next to
 the main log) listing NEW_VENUE/MEDIUM classifications from this run --
@@ -102,7 +106,7 @@ def load_matched_venues(conn, medium_threshold: float) -> list[dict]:
     return [dict(zip(columns, row)) for row in rows]
 
 
-def run(force: bool) -> int:
+def run(force: bool, recheck_unknown: bool = False) -> int:
     config = load_config()
     logger = setup_logger("classify_insertions", config.log_dir / "classify_insertions.log")
 
@@ -140,13 +144,20 @@ def run(force: bool) -> int:
     ).fetchall()
     logger.info("%d FHRS INSERT events to consider", len(insert_events))
 
+    recheck_keys: set[tuple[int, str]] = set()
+    if recheck_unknown:
+        since = (dt.date.today() - dt.timedelta(days=config.unknown_recheck_window_days)).isoformat()
+        recheck_keys = db.get_unknown_recheck_keys(conn, since)
+        logger.info("%d UNKNOWN event(s) since %s will be reclassified", len(recheck_keys), since)
+
     classified = 0
     already_count = 0
     counts = Counter()
     review_queue = []
+    upgraded = 0
 
     for fhrsid, authority_code, collection_date in insert_events:
-        if not force and db.already_classified(conn, fhrsid, collection_date):
+        if not force and (fhrsid, collection_date) not in recheck_keys and db.already_classified(conn, fhrsid, collection_date):
             already_count += 1
             continue
 
@@ -187,11 +198,16 @@ def run(force: bool) -> int:
 
         classified += 1
         counts[(result.classification, result.confidence)] += 1
+        if (fhrsid, collection_date) in recheck_keys and result.classification != "UNKNOWN":
+            upgraded += 1
+            logger.info("fhrsid %s upgraded from UNKNOWN to %s/%s on recheck", fhrsid, result.classification, result.confidence)
 
         if result.confidence == "MEDIUM" and result.classification in ("NEW_VENUE", "OPERATOR_CHANGE"):
             review_queue.append((fhrsid, establishment["business_name"], result.reason))
 
     logger.info("done: %d classified, %d already classified, %d total INSERT events", classified, already_count, len(insert_events))
+    if recheck_unknown:
+        logger.info("recheck: %d of %d UNKNOWN event(s) upgraded", upgraded, len(recheck_keys))
     for (classification, confidence), n in sorted(counts.items()):
         logger.info("  %s / %s: %d", classification, confidence, n)
 
@@ -209,12 +225,17 @@ def run(force: bool) -> int:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--force", action="store_true", help="Reclassify INSERT events already classified")
+    parser.add_argument(
+        "--recheck-unknown", action="store_true",
+        help="Also reclassify events currently UNKNOWN within config.toml's "
+             "[classification].unknown_recheck_window_days (run after match_companies_house.py --recheck-unknown)",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    sys.exit(run(args.force))
+    sys.exit(run(args.force, args.recheck_unknown))
 
 
 if __name__ == "__main__":

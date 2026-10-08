@@ -629,6 +629,52 @@ fires as soon as possible afterwards. Runs under your user account with
 `LogonType: Interactive` (no stored password) — the machine needs to be on
 *and* you logged in (a locked screen is fine) for it to fire.
 
+A second, independent task, `FSA Data Pipeline Run Check`, runs daily at
+13:15 and calls `scripts/check_daily_run.py`. It exists because every
+check in `monitor_pipeline.py` (stage 6) only runs if `run_daily.ps1`
+itself reaches its last stage — so none of them can catch the day the
+scheduled task never started at all. Confirmed 2026-09-30: the machine
+was asleep through the 11:00 trigger, `run_daily.ps1` never started, and
+monitoring never got a chance to say so. `check_daily_run.py` checks log
+file presence instead of the database (the one thing guaranteed to exist
+independently of whether the pipeline wrote anything) and alerts into the
+same `logs/_alerts_<date>.log` if today's run didn't start, or started
+but never reached `monitor_pipeline_<date>.log`. 13:15 gives
+`run_daily.ps1`'s own 2-hour `ExecutionTimeLimit` room to finish first.
+
+```powershell
+Get-ScheduledTaskInfo -TaskName "FSA Data Pipeline Run Check"
+Start-ScheduledTask -TaskName "FSA Data Pipeline Run Check"   # trigger a check right now
+```
+
+Since 2026-10-01 this task calls `scripts/run_check.ps1`, which runs
+`check_daily_run.py` and then `scripts/send_run_status_email.py` — a
+daily email reporting whether today's collection has started/completed,
+with that day's `_alerts_<date>.log` attached if one exists (see
+`fsa_pipeline/alerting.py` and config.toml's `[alerting]` section). This
+is a deliberate reversal of the 2026-09-11 decision to use a log file
+instead of email (see `[monitoring]`'s comment in config.toml) — your
+call, made 2026-10-01.
+
+**Setup required** (not done yet — the script logs a warning and exits
+cleanly without sending until this is in place): generate a Gmail App
+Password (needs 2-Step Verification turned on first) at
+myaccount.google.com/apppasswords, then add two lines to `.env` (never
+committed):
+
+```
+SMTP_USER=youraddress@gmail.com
+SMTP_PASSWORD=the16charapppassword
+```
+
+Recipient, SMTP host/port, and an `enabled` on/off switch live in
+config.toml's `[alerting]` section (not secret, so not in `.env`). Test
+it directly once `.env` is set:
+
+```bash
+python scripts/send_run_status_email.py --date 2026-09-30
+```
+
 ## Running the daily parse
 
 After collection, parse that day's raw archive into the database:
@@ -723,6 +769,9 @@ Reads only from the database, never touches raw files or the network.
 Idempotent per (FHRSID, INSERT date); pass `--force` to rematch
 everything (candidates can change as new Companies House data arrives —
 matching isn't a one-time fact the way an observation is).
+`--recheck-unknown` (passed by `run_daily.ps1` since 2026-10-07) rematches
+only events currently `UNKNOWN` within `[classification]
+unknown_recheck_window_days` (90) — see "Design notes".
 
 ## Running the postcode backfill
 
@@ -752,7 +801,9 @@ python scripts/classify_insertions.py
 Reads only from the database, never touches raw files or the network.
 Idempotent per (FHRSID, INSERT date); pass `--force` to reclassify
 everything (evidence changes as new Companies House data or new FHRS
-establishments arrive). Part of the daily scheduled run, last of the
+establishments arrive). `--recheck-unknown` (passed by `run_daily.ps1`
+since 2026-10-07) reclassifies only recent `UNKNOWN` events and logs how
+many upgraded. Part of the daily scheduled run, last of the
 data stages — it needs both the matcher's evidence and the current
 `establishments_current` baseline. Monitoring runs after it.
 
@@ -1710,6 +1761,71 @@ and confirms the lookup still finds it.
   same underlying data. Distinct from the existing `--business-type`
   filter (a substring match the buyer opts into) -- this is scope, not a
   search refinement.
+- **"Did the scheduled job even run" gap closed, 2026-09-30.** Every
+  check in `monitor_pipeline.py` (stage 6) reads the database, which
+  only has today's rows if `run_daily.ps1` reached its last stage --
+  so none of them, including `monitor_pipeline.py` itself, run at all
+  if the scheduled task never starts. Found for real 2026-09-30: the
+  machine was asleep through the daily 11:00 Task Scheduler trigger
+  (`StartWhenAvailable` didn't catch up on its own within several
+  hours of waking), the task was silently marked as one missed run,
+  and nothing downstream -- collection, parsing, diffing, monitoring --
+  ran, or alerted, that day. Fixed with `scripts/check_daily_run.py`
+  (`fsa_pipeline/monitoring.py`'s `check_daily_run_completed`), reading
+  log file presence rather than the database -- the one thing that
+  doesn't depend on the pipeline itself having run -- and registered as
+  its own separate Task Scheduler task, `FSA Data Pipeline Run Check`,
+  at 13:15 daily (after `run_daily.ps1`'s own 2-hour
+  `ExecutionTimeLimit`), so it isn't downstream of the exact failure
+  it exists to catch. Alerts into the same `logs/_alerts_<date>.log`
+  as every other check, via a shared `append_alerts` helper (also
+  de-duplicated out of `monitor_pipeline.py`, which previously had its
+  own private copy). See "Scheduling" above for the task itself.
+- **Daily status email added 2026-10-01** (`fsa_pipeline/alerting.py`,
+  `scripts/send_run_status_email.py`). A deliberate, explicit reversal
+  of the 2026-09-11 decision (`[monitoring]` in config.toml) to use a
+  log file instead of email -- your call, asked for directly, not a
+  default we drifted back into. Runs as the second step of
+  `scripts/run_check.ps1` (the `FSA Data Pipeline Run Check` task, see
+  "Scheduling"), right after `check_daily_run.py`, so the email always
+  reflects whatever that check just found. Reports started/completed
+  status in the subject line and attaches that day's
+  `_alerts_<date>.log` if one exists. Gmail SMTP with an App Password
+  (`SMTP_USER`/`SMTP_PASSWORD` in `.env`, never a real account
+  password) -- missing credentials or `[alerting]`'s `enabled = false`
+  both log why and exit 0 rather than failing the scheduled task; only
+  a real send failure (bad credentials, network down) exits 1, since
+  that's this script's one actual job failing. Email-building is a
+  pure, tested function (`build_status_email`); the actual SMTP send is
+  the one function left untested, same convention as every other
+  network-touching call in this codebase.
+- **`UNKNOWN` events are rechecked daily, and late-incorporated companies
+  now count, 2026-10-07.** Two gaps, found by asking whether a company
+  registered *after* its venue's FHRS record could ever upgrade an
+  `UNKNOWN`: (1) matching and classification were one-shot per INSERT
+  event, so a company that reached Companies House data later was never
+  found; (2) even when found, `_incorporation_recency` computes
+  `first_seen - incorporated`, so a company incorporated after the venue
+  gave a negative age, fell into the "old company" branch and stayed
+  `UNKNOWN`. Measured read-only against 12,799 real `UNKNOWN`s first: 24
+  newly-findable late companies (1-41 days after FHRS registration) plus
+  7 already-stored candidates stuck on the sign (31, 0.24%). Fixed with
+  `--recheck-unknown` on both `match_companies_house.py` and
+  `classify_insertions.py` (rematch/reclassify only `UNKNOWN` events
+  within `[classification].unknown_recheck_window_days`, 90, passed by
+  `run_daily.ps1`) and `_incorporated_late` in `classifier.py`: a company
+  incorporated 1-`new_venue_late_incorporation_window_days` (90) days
+  *after* first-seen now qualifies as `NEW_VENUE`, **capped at MEDIUM**,
+  with a reason noting it. MEDIUM because a late company is also what a
+  sole trader incorporating an existing business looks like and the data
+  can't distinguish them. Such rows have `recently_incorporated=True`
+  (within the window, just on the other side of first-seen). Simulating
+  the new logic read-only against real data predicted 36 upgrades (32
+  MEDIUM, 4 HIGH — the HIGH ones are on-time companies that only entered
+  Companies House data after matching first ran; the rematch finds
+  those too). They surface in the usual `_review_queue_<date>.log` as
+  `NEW_VENUE`/`MEDIUM`. An `UNKNOWN` older than 90 days is never
+  rechecked.
 
 ## Data licensing
 

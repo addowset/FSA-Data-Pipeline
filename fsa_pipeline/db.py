@@ -886,6 +886,21 @@ def already_classified(conn: sqlite3.Connection, fhrsid: int, insert_collection_
     return row is not None
 
 
+def get_unknown_recheck_keys(conn: sqlite3.Connection, since_date: str) -> set[tuple[int, str]]:
+    """(fhrsid, insert_collection_date) of every currently-UNKNOWN
+    classification whose INSERT date is on or after since_date -- the
+    events worth rematching/reclassifying because a Companies House
+    company registered after the venue could now exist. Used by both
+    match_companies_house.py and classify_insertions.py's
+    --recheck-unknown."""
+    rows = conn.execute(
+        "SELECT fhrsid, insert_collection_date FROM classifications "
+        "WHERE classification = 'UNKNOWN' AND insert_collection_date >= ?",
+        (since_date,),
+    ).fetchall()
+    return {(fhrsid, date) for fhrsid, date in rows}
+
+
 def record_classification(
     conn: sqlite3.Connection,
     fhrsid: int,

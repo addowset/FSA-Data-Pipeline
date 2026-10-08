@@ -169,6 +169,24 @@ address_history_fallback_threshold = 0.9
 # multi-venue-company event (no SIC widening has run yet), revisit once
 # one occurs.
 multi_venue_company_threshold = 5
+#
+# Late-incorporated companies, added 2026-10-07. A company incorporated
+# AFTER its venue first appeared in FHRS (up to this many days later) still
+# counts as NEW_VENUE evidence, capped at MEDIUM -- previously a negative
+# age fell into the "old company" branch and stayed UNKNOWN. Measured
+# 2026-10-07 against real UNKNOWNs: 24 companies found since matching ran,
+# 1-41 days after FHRS registration, plus 7 already-stored candidates
+# stuck on the sign gate (31 of 12,799, 0.24%). Capped at MEDIUM because a
+# late company is also what a sole trader incorporating an existing
+# business looks like -- the data can't tell the two apart.
+new_venue_late_incorporation_window_days = 90
+# Daily recheck of UNKNOWN events (match_companies_house.py and
+# classify_insertions.py --recheck-unknown, passed by run_daily.ps1):
+# rematch and reclassify UNKNOWN events whose INSERT date is within this
+# many days, so a company registered after the venue can still be found.
+# Kept >= the late-incorporation window above or the tail would never be
+# rechecked.
+unknown_recheck_window_days = 90
 
 [officer_churn]
 # Opt-in, disabled by default. Discussed with the user 2026-09-08:
@@ -311,3 +329,20 @@ output_dir = "exports"
 # Used in the User-Agent header sent with every request, per FSA's request
 # for an honest, identifiable client. Not a secret.
 email = "andydowsett@hotmail.com"
+
+[alerting]
+# Daily status email, added 2026-10-01 -- a deliberate reversal of the
+# 2026-09-11 decision (see [monitoring] above) to use a log file instead
+# of email. Sent by scripts/send_run_status_email.py, run right after
+# check_daily_run.py as part of the "FSA Data Pipeline Run Check"
+# scheduled task (13:15 daily) -- reports whether today's collection has
+# started/completed and attaches that day's logs/_alerts_<date>.log if
+# one exists. `enabled` lets this be turned off without removing the
+# scheduled task. Credentials (SMTP_USER, SMTP_PASSWORD -- a Gmail app
+# password, never a real account password) are read from the environment
+# via .env, same convention as COMPANIES_HOUSE_API_KEY -- never put them
+# here, this file is not gitignored.
+enabled = true
+recipient_email = "andydowsett@hotmail.com"
+smtp_host = "smtp.gmail.com"
+smtp_port = 587

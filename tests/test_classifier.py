@@ -44,6 +44,7 @@ def make_config(**overrides) -> Config:
         new_venue_high_threshold=0.85, new_venue_medium_threshold=0.6,
         new_venue_max_incorporation_age_days=180, address_history_fallback_threshold=0.9,
         multi_venue_company_threshold=5,
+        new_venue_late_incorporation_window_days=90, unknown_recheck_window_days=90,
         officer_churn_enabled=False, officer_churn_window_days=60, officer_churn_request_delay_seconds=0.0,
         operator_search_recheck_after_days=30,
         monitoring_staleness_ratio=3.0, monitoring_staleness_min_age_days=10,
@@ -52,6 +53,8 @@ def make_config(**overrides) -> Config:
         monitoring_record_count_min_history_days=5, monitoring_record_count_min_floor=10,
         monitoring_max_skipped_record_ratio=0.01,
         export_output_dir=Path("exports"),
+        alerting_enabled=True, alerting_recipient_email="test@example.invalid",
+        alerting_smtp_host="smtp.example.invalid", alerting_smtp_port=587,
     )
     return dataclasses.replace(base, **overrides)
 
@@ -809,3 +812,97 @@ def test_predecessor_lookup_works_against_establishment_with_zero_field_changed_
     assert result is not None
     assert result.fhrsid == 1
     assert result.business_name == "The Old Castle"
+
+
+# --- late-incorporated companies (added 2026-10-07) ---
+
+def test_classify_new_venue_when_company_incorporated_shortly_after_first_seen():
+    candidate = make_candidate(score=1.0, date_of_creation="2026-09-11")  # 1 day AFTER first_seen
+    result = classify(
+        first_seen_date="2026-09-10", postcode="N19 3NU", candidates_found=1, best_candidate=candidate,
+        predecessor=None, existing_operator=None, config=make_config(),
+    )
+
+    assert result.classification == "NEW_VENUE"
+    assert result.recently_incorporated is True
+    assert "incorporated AFTER the venue first appeared" in result.reason
+
+
+def test_classify_late_incorporation_confidence_capped_at_medium():
+    """A perfect name match would be HIGH for an on-time company; a late
+    one is also what a sole trader incorporating an existing business
+    looks like, so it never reaches HIGH."""
+    on_time = classify(
+        first_seen_date="2026-09-10", postcode="N19 3NU", candidates_found=1,
+        best_candidate=make_candidate(score=1.0, date_of_creation="2026-09-01"),
+        predecessor=None, existing_operator=None, config=make_config(),
+    )
+    late = classify(
+        first_seen_date="2026-09-10", postcode="N19 3NU", candidates_found=1,
+        best_candidate=make_candidate(score=1.0, date_of_creation="2026-09-20"),
+        predecessor=None, existing_operator=None, config=make_config(),
+    )
+
+    assert on_time.confidence == "HIGH"
+    assert late.confidence == "MEDIUM"
+
+
+def test_classify_late_incorporation_accepted_at_exactly_window():
+    candidate = make_candidate(score=1.0, date_of_creation="2026-12-09")  # exactly 90 days after
+    result = classify(
+        first_seen_date="2026-09-10", postcode="N19 3NU", candidates_found=1, best_candidate=candidate,
+        predecessor=None, existing_operator=None, config=make_config(),
+    )
+    assert result.classification == "NEW_VENUE"
+
+
+def test_classify_late_incorporation_rejected_one_day_over_window():
+    candidate = make_candidate(score=1.0, date_of_creation="2026-12-10")  # 91 days after
+    result = classify(
+        first_seen_date="2026-09-10", postcode="N19 3NU", candidates_found=1, best_candidate=candidate,
+        predecessor=None, existing_operator=None, config=make_config(),
+    )
+    assert result.classification == "UNKNOWN"
+    assert result.recently_incorporated is False
+
+
+def test_classify_late_incorporation_respects_configured_window():
+    candidate = make_candidate(score=1.0, date_of_creation="2026-09-20")  # 10 days after
+    result = classify(
+        first_seen_date="2026-09-10", postcode="N19 3NU", candidates_found=1, best_candidate=candidate,
+        predecessor=None, existing_operator=None, config=make_config(new_venue_late_incorporation_window_days=5),
+    )
+    assert result.classification == "UNKNOWN"
+
+
+def test_classify_late_incorporation_address_match_low_name_score():
+    """The 'Poppys Deserts' shape: exact registered-address match, name
+    similarity 0.0, company incorporated the day after FHRS registration."""
+    candidate = make_candidate(score=0.0, date_of_creation="2026-10-01", address_matches_establishment=True)
+    result = classify(
+        first_seen_date="2026-09-30", postcode="N19 3NU", candidates_found=1, best_candidate=candidate,
+        predecessor=None, existing_operator=None, config=make_config(),
+    )
+    assert result.classification == "NEW_VENUE"
+    assert result.confidence == "MEDIUM"
+
+
+def test_classify_late_incorporation_does_not_override_operator_change():
+    predecessor = Predecessor(fhrsid=9, business_name="Old Cafe", first_seen_date="2026-01-01", last_seen_date="2026-09-01")
+    candidate = make_candidate(score=1.0, date_of_creation="2026-09-12")
+    result = classify(
+        first_seen_date="2026-09-10", postcode="N19 3NU", candidates_found=1, best_candidate=candidate,
+        predecessor=predecessor, existing_operator=None, config=make_config(),
+    )
+    assert result.classification == "OPERATOR_CHANGE"
+
+
+def test_classify_company_incorporated_on_first_seen_date_is_not_late():
+    candidate = make_candidate(score=1.0, date_of_creation="2026-09-10")
+    result = classify(
+        first_seen_date="2026-09-10", postcode="N19 3NU", candidates_found=1, best_candidate=candidate,
+        predecessor=None, existing_operator=None, config=make_config(),
+    )
+    assert result.classification == "NEW_VENUE"
+    assert result.confidence == "HIGH"  # on-time, not capped
+    assert "AFTER the venue" not in result.reason

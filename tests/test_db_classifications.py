@@ -81,3 +81,24 @@ def test_predecessor_name_match_round_trips_true_false_and_none(tmp_path):
 
     rows = dict(conn.execute("SELECT fhrsid, predecessor_name_match FROM classifications").fetchall())
     assert rows == {1: 1, 2: 0, 3: None}
+
+
+def test_get_unknown_recheck_keys_only_returns_recent_unknowns(tmp_path):
+    conn = db.connect(tmp_path / "t.db")
+    unknown = Classification(classification="UNKNOWN", confidence="LOW", reason="no match")
+    new_venue = Classification(classification="NEW_VENUE", confidence="HIGH", reason="matched", evidence_company_number="1")
+    db.record_classification(conn, 1, "857", "2026-09-20", unknown, "t")   # recent UNKNOWN
+    db.record_classification(conn, 2, "857", "2026-06-01", unknown, "t")   # UNKNOWN but too old
+    db.record_classification(conn, 3, "857", "2026-09-20", new_venue, "t")  # recent but not UNKNOWN
+
+    keys = db.get_unknown_recheck_keys(conn, "2026-07-01")
+
+    assert keys == {(1, "2026-09-20")}
+
+
+def test_get_unknown_recheck_keys_boundary_is_inclusive(tmp_path):
+    conn = db.connect(tmp_path / "t.db")
+    unknown = Classification(classification="UNKNOWN", confidence="LOW", reason="no match")
+    db.record_classification(conn, 1, "857", "2026-07-01", unknown, "t")
+
+    assert db.get_unknown_recheck_keys(conn, "2026-07-01") == {(1, "2026-07-01")}
