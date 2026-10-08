@@ -65,6 +65,8 @@ def csv_row_to_feed_row(r: dict) -> dict:
         "pbn": r["previous_business_name"],
         "pls": r["previous_last_seen"],
         "ms": r["match_status"] == "Yes",
+        # .get: exports before 2026-10-08 have no batch_publication column.
+        "bp": r.get("batch_publication") == "Yes",
         "cnm": r["company_name"],
         "cn": r["company_number"],
         "cst": r["company_status"],

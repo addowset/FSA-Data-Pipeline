@@ -30,6 +30,12 @@ def test_row_mapping_types():
     assert evf.csv_row_to_feed_row(_csv_row(match_status="No"))["ms"] is False
 
 
+def test_batch_flag_and_older_csvs_without_the_column():
+    assert evf.csv_row_to_feed_row(_csv_row(batch_publication="Yes"))["bp"] is True
+    assert evf.csv_row_to_feed_row(_csv_row(batch_publication="No"))["bp"] is False
+    assert evf.csv_row_to_feed_row(_csv_row())["bp"] is False
+
+
 def test_build_page_splices_and_escapes():
     template = f"<p>{evf.SOURCE_PLACEHOLDER}</p><script>const D = {evf.DATA_PLACEHOLDER}; const G = \"{evf.DATE_PLACEHOLDER}\";</script>"
     rows = [evf.csv_row_to_feed_row(_csv_row(business_name="</script><b>x"))]

@@ -112,6 +112,8 @@ td.au{color:var(--ink-dim);font-size:12.5px;max-width:150px;}
 .pill.nv{background:var(--nv-soft);color:var(--nv);}
 .pill.oc{background:var(--oc-soft);color:var(--oc);}
 .pill.un{background:var(--un-soft);color:var(--un);}
+.batch{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:4px;border:1px solid var(--warn);color:var(--warn);font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;vertical-align:1px;white-space:nowrap;}
+.stat.bp .n{color:var(--warn);}
 .pill .dot{width:6px;height:6px;border-radius:50%;background:currentColor;}
 .conf{font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
 .conf.HIGH{opacity:1;font-weight:600;}
@@ -157,6 +159,11 @@ td.au{color:var(--ink-dim);font-size:12.5px;max-width:150px;}
       <option value="MEDIUM">Medium</option>
       <option value="LOW">Low</option>
     </select>
+    <select id="batchFilter">
+      <option value="ALL">Batch uploads: include</option>
+      <option value="exclude">Hide batch uploads</option>
+      <option value="only">Only batch uploads</option>
+    </select>
     <select id="matchFilter">
       <option value="ALL">Match status: any</option>
       <option value="yes">Has company match</option>
@@ -195,7 +202,7 @@ const CLASS_META = {
 };
 
 const state = {
-  search:'', confidence:'ALL', matchStatus:'ALL', classFilter:null,
+  search:'', confidence:'ALL', matchStatus:'ALL', batch:'ALL', classFilter:null,
   sortField:'id', sortDir:'desc', page:1, pageSize:50, expanded:null,
 };
 
@@ -206,10 +213,11 @@ function escapeHtml(s){
 }
 
 function computeStats(){
-  const c = {NEW_VENUE:0, OPERATOR_CHANGE:0, UNKNOWN:0, matched:0};
+  const c = {NEW_VENUE:0, OPERATOR_CHANGE:0, UNKNOWN:0, matched:0, batch:0};
   for(const r of RAW_DATA){
     c[r.cl] = (c[r.cl]||0)+1;
     if(r.ms) c.matched++;
+    if(r.bp) c.batch++;
   }
   return c;
 }
@@ -219,6 +227,7 @@ function filteredSorted(){
   if(state.classFilter) rows = rows.filter(r => r.cl === state.classFilter);
   if(state.confidence !== 'ALL') rows = rows.filter(r => r.cf === state.confidence);
   if(state.matchStatus !== 'ALL') rows = rows.filter(r => state.matchStatus === 'yes' ? r.ms : !r.ms);
+  if(state.batch !== 'ALL') rows = rows.filter(r => state.batch === 'only' ? r.bp : !r.bp);
   const q = state.search.trim().toLowerCase();
   if(q){
     rows = rows.filter(r =>
@@ -254,7 +263,8 @@ function renderStats(){
       <span class="n">${c2.n.toLocaleString()}</span>
       <span class="l">${c2.l}</span>
     </div>`).join('') +
-    `<div class="stat ${state.matchStatus==='yes'?'active':''}" id="matchedChip"><span class="n">${c.matched.toLocaleString()}</span><span class="l">Has company match</span></div>`;
+    `<div class="stat ${state.matchStatus==='yes'?'active':''}" id="matchedChip"><span class="n">${c.matched.toLocaleString()}</span><span class="l">Has company match</span></div>` +
+    `<div class="stat bp ${state.batch==='only'?'active':''}" id="batchChip" title="Real records that arrived in one large upload from the authority; first-seen date may lag the actual opening"><span class="n">${c.batch.toLocaleString()}</span><span class="l">Batch uploads</span></div>`;
 
   document.getElementById('stats').querySelectorAll('[data-classfilter]').forEach(el => {
     el.addEventListener('click', () => {
@@ -263,6 +273,11 @@ function renderStats(){
       state.page = 1;
       render();
     });
+  });
+  document.getElementById('batchChip').addEventListener('click', () => {
+    state.batch = state.batch === 'only' ? 'ALL' : 'only';
+    document.getElementById('batchFilter').value = state.batch;
+    state.page=1; render();
   });
   document.getElementById('matchedChip').addEventListener('click', () => {
     state.matchStatus = state.matchStatus === 'yes' ? 'ALL' : 'yes';
@@ -293,7 +308,8 @@ function renderDetail(row){
         <h4>Details</h4>
         <dl class="meta-grid">
           <dt>Business type</dt><dd>${escapeHtml(row.bt)}</dd>
-          <dt>Rating status</dt><dd>${escapeHtml(row.rst)}</dd>
+          <dt>Rating status</dt><dd>${escapeHtml(row.rst)}</dd>${row.bp ? `
+          <dt>Batch upload</dt><dd>Arrived in one large upload from ${escapeHtml(row.au)} -- a real record, but the first-seen date may lag the actual opening.</dd>` : ''}
           <dt>Postcode</dt><dd class="mono">${escapeHtml(row.pc||'—')} <span style="color:var(--ink-dim);">(${row.ac.replace('_',' ')})</span></dd>
           <dt>Company match</dt>${companyRow}${previousRow}
         </dl>
@@ -321,7 +337,7 @@ function renderRows(){
       return `
         <tr class="row ${isExpanded?'expanded':''}" data-id="${row.id}">
           <td class="id mono">${row.id}</td>
-          <td class="name">${escapeHtml(row.n)}</td>
+          <td class="name">${escapeHtml(row.n)}${row.bp ? '<span class="batch">Batch</span>' : ''}</td>
           <td class="addr">${escapeHtml(row.a||'')}<br><span class="pc mono">${escapeHtml(row.pc||'')}</span></td>
           <td class="au">${escapeHtml(row.au||'')}</td>
           <td><span class="pill ${meta.cls}"><span class="dot"></span>${meta.label}</span> <span class="conf ${row.cf}">${row.cf}</span></td>
@@ -380,6 +396,9 @@ document.getElementById('search').addEventListener('input', (e) => {
 });
 document.getElementById('confFilter').addEventListener('change', (e) => {
   state.confidence = e.target.value; state.page = 1; render();
+});
+document.getElementById('batchFilter').addEventListener('change', (e) => {
+  state.batch = e.target.value; state.page = 1; render();
 });
 document.getElementById('matchFilter').addEventListener('change', (e) => {
   state.matchStatus = e.target.value; state.page = 1; render();
