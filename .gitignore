@@ -16,3 +16,5 @@ __pycache__/
 # not source.
 tools/audit_data.json
 tools/audit_ledger.html
+# Built by scripts/export_venue_feed.py from tools/venue_feed_template.html.
+tools/venue_feed.html

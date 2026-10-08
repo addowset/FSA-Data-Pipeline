@@ -1,0 +1,401 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1"><style>:root{color-scheme:light}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<!--
+Template for the "Venue Feed" page -- a published Claude Artifact
+(private, not hosted by this repo) for browsing the CSV export.
+
+This file is the reusable source: CSS + JS, no data. Don't edit the
+generated tools/venue_feed.html; edit this, then rebuild:
+  python scripts/export_venue_feed.py
+which splices the newest exports/Venue CSV/venues_*.csv into the empty
+data array below and fills in the date and filename placeholders. Then
+ask Claude to republish tools/venue_feed.html to the existing artifact
+URL (recorded in the assistant's memory, not in this repo) -- the
+script builds the page, it doesn't publish it.
+-->
+<title>Venue Feed</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ink:#1b2430; --ink-dim:#4b5563; --paper:#eef0ea; --surface:#f8f9f5; --surface-raised:#ffffff;
+  --line:#d6d9d0; --line-strong:#b9bdb2;
+  --accent:#1f6f64; --accent-ink:#0f4a42; --accent-soft:#dcece8;
+  --nv:#1f6f64; --nv-soft:#dcece8;
+  --oc:#8a5a34; --oc-soft:#efe2d3;
+  --un:#6b7280; --un-soft:#e5e6e8;
+  --good:#2f7d4f; --warn:#b8842a; --bad:#b5502f;
+  --focus:#1f6f64;
+  --shadow: 0 1px 2px rgba(27,36,48,0.06), 0 4px 14px rgba(27,36,48,0.05);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ink:#e7e9e4; --ink-dim:#a7ada2; --paper:#141a17; --surface:#1b221e; --surface-raised:#212924;
+    --line:#333e37; --line-strong:#455049;
+    --accent:#3fb3a2; --accent-ink:#9fe4d8; --accent-soft:#1e3a35;
+    --nv:#3fb3a2; --nv-soft:#1e3a35;
+    --oc:#d3a06e; --oc-soft:#3a2e1f;
+    --un:#9aa1a8; --un-soft:#2a2e33;
+    --good:#4fae76; --warn:#d3a552; --bad:#d97a57;
+    --focus:#3fb3a2;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 4px 18px rgba(0,0,0,0.35);
+  }
+}
+:root[data-theme="dark"]{
+  --ink:#e7e9e4; --ink-dim:#a7ada2; --paper:#141a17; --surface:#1b221e; --surface-raised:#212924;
+  --line:#333e37; --line-strong:#455049;
+  --accent:#3fb3a2; --accent-ink:#9fe4d8; --accent-soft:#1e3a35;
+  --nv:#3fb3a2; --nv-soft:#1e3a35;
+  --oc:#d3a06e; --oc-soft:#3a2e1f;
+  --un:#9aa1a8; --un-soft:#2a2e33;
+  --good:#4fae76; --warn:#d3a552; --bad:#d97a57;
+  --focus:#3fb3a2;
+  --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 4px 18px rgba(0,0,0,0.35);
+}
+*{box-sizing:border-box;}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:"Public Sans",system-ui,-apple-system,sans-serif;font-size:14px;line-height:1.45;}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums;}
+h1,h2{font-family:"Fraunces",Georgia,serif;font-weight:600;text-wrap:balance;margin:0;}
+a{color:var(--accent);}
+button,input,select{font-family:inherit;font-size:inherit;color:inherit;}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px;}
+
+#app{max-width:1360px;margin:0 auto;padding:28px 24px 60px;}
+
+.masthead{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:4px;flex-wrap:wrap;}
+.masthead h1{font-size:26px;letter-spacing:-0.01em;}
+.masthead .sub{color:var(--ink-dim);font-size:13px;}
+.sub-line{color:var(--ink-dim);font-size:13px;margin-bottom:20px;}
+
+.stats{display:flex;gap:10px;flex-wrap:wrap;margin:20px 0 18px;}
+.stat{
+  display:flex;flex-direction:column;gap:2px;padding:10px 14px;border-radius:10px;
+  background:var(--surface-raised);border:1px solid var(--line);cursor:pointer;
+  min-width:108px;box-shadow:var(--shadow);
+  transition:border-color .12s ease, transform .08s ease;
+}
+.stat:hover{border-color:var(--line-strong);}
+.stat:active{transform:translateY(1px);}
+.stat.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset, var(--shadow);}
+.stat .n{font-family:"IBM Plex Mono";font-size:20px;font-weight:500;font-variant-numeric:tabular-nums;}
+.stat .l{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-dim);}
+.stat.nv .n{color:var(--nv);} .stat.oc .n{color:var(--oc);} .stat.un .n{color:var(--un);}
+
+.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;padding:12px 14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;}
+.toolbar input[type=search]{
+  flex:1 1 240px;min-width:180px;padding:7px 10px;border:1px solid var(--line-strong);border-radius:7px;
+  background:var(--surface-raised);color:var(--ink);
+}
+.toolbar select{padding:6px 8px;border:1px solid var(--line-strong);border-radius:7px;background:var(--surface-raised);color:var(--ink);}
+.toolbar .count{margin-left:auto;font-size:12px;color:var(--ink-dim);white-space:nowrap;}
+.toolbar .count .mono{color:var(--ink);}
+
+table{width:100%;border-collapse:collapse;background:var(--surface-raised);border:1px solid var(--line);border-radius:10px;overflow:hidden;}
+.tablewrap{overflow-x:auto;border-radius:10px;box-shadow:var(--shadow);}
+thead th{
+  text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-dim);
+  padding:10px 12px;border-bottom:1px solid var(--line);background:var(--surface);cursor:pointer;user-select:none;
+  white-space:nowrap;
+}
+thead th:hover{color:var(--ink);}
+thead th.sorted{color:var(--accent);}
+thead th .arrow{font-size:9px;margin-left:3px;}
+tbody tr.row{border-bottom:1px solid var(--line);cursor:pointer;}
+tbody tr.row:hover{background:var(--surface);}
+tbody tr.row.expanded{background:var(--surface);}
+td{padding:9px 12px;vertical-align:top;}
+td.id{color:var(--ink-dim);}
+td.name{font-weight:500;max-width:220px;}
+td.addr{color:var(--ink-dim);font-size:12.5px;max-width:220px;}
+td.addr .pc{color:var(--ink);}
+td.au{color:var(--ink-dim);font-size:12.5px;max-width:150px;}
+
+.pill{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:99px;font-size:11.5px;font-weight:600;letter-spacing:.02em;white-space:nowrap;}
+.pill.nv{background:var(--nv-soft);color:var(--nv);}
+.pill.oc{background:var(--oc-soft);color:var(--oc);}
+.pill.un{background:var(--un-soft);color:var(--un);}
+.pill .dot{width:6px;height:6px;border-radius:50%;background:currentColor;}
+.conf{font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
+.conf.HIGH{opacity:1;font-weight:600;}
+.conf.MEDIUM{opacity:.75;}
+.conf.LOW{opacity:.5;}
+.matchdot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:middle;}
+.matchdot.yes{background:var(--good);}
+.matchdot.no{background:var(--line-strong);}
+
+.detail{background:var(--paper);border-bottom:1px solid var(--line);}
+.detail-inner{padding:16px 20px 20px;display:grid;grid-template-columns:1.3fr 1fr;gap:24px;}
+@media (max-width: 820px){.detail-inner{grid-template-columns:1fr;}}
+.detail h4{font-family:"Public Sans";font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-dim);font-weight:700;margin-bottom:8px;}
+.reason{font-size:13px;line-height:1.55;background:var(--surface-raised);border:1px solid var(--line);border-radius:8px;padding:12px 14px;}
+.meta-grid{display:grid;grid-template-columns:auto 1fr;gap:8px 14px;font-size:13px;}
+.meta-grid dt{color:var(--ink-dim);}
+.meta-grid dd{margin:0;}
+.btn{display:inline-block;padding:6px 14px;border-radius:7px;border:1px solid var(--accent);background:var(--accent);color:#fff;font-weight:600;font-size:12.5px;cursor:pointer;text-decoration:none;}
+.btn.ghost{background:transparent;color:var(--accent);}
+.btn:hover{filter:brightness(1.08);}
+
+.pager{display:flex;align-items:center;gap:10px;justify-content:center;margin-top:16px;font-size:13px;color:var(--ink-dim);}
+.pager button{padding:5px 12px;border-radius:6px;border:1px solid var(--line-strong);background:var(--surface-raised);cursor:pointer;color:var(--ink);}
+.pager button:disabled{opacity:.4;cursor:default;}
+.pager .mono{color:var(--ink);}
+
+.empty{padding:40px;text-align:center;color:var(--ink-dim);}
+</style>
+
+<div id="app">
+  <div class="masthead">
+    <h1>Venue Feed</h1>
+    <div class="sub">FSA Data Pipeline &middot; <span class="mono" id="asOf"></span></div>
+  </div>
+  <div class="sub-line">Every non-quarantined classified INSERT event in the archive so far &mdash; the same rows as <span class="mono">__SOURCE_CSV__</span>.</div>
+
+  <div class="stats" id="stats"></div>
+  <div class="toolbar">
+    <input type="search" id="search" placeholder="Search business name, postcode, authority, or company number&hellip;">
+    <select id="confFilter">
+      <option value="ALL">Any confidence</option>
+      <option value="HIGH">High</option>
+      <option value="MEDIUM">Medium</option>
+      <option value="LOW">Low</option>
+    </select>
+    <select id="matchFilter">
+      <option value="ALL">Match status: any</option>
+      <option value="yes">Has company match</option>
+      <option value="no">No company match</option>
+    </select>
+    <div class="count"><span class="mono" id="matchCount"></span> matching</div>
+  </div>
+
+  <div class="tablewrap">
+    <table>
+      <thead>
+        <tr>
+          <th data-sort="id">FHRSID</th>
+          <th data-sort="n">Business</th>
+          <th>Address</th>
+          <th data-sort="au">Authority</th>
+          <th data-sort="cl">Classification</th>
+          <th>Match</th>
+          <th data-sort="fs">First seen</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+  <div class="pager" id="pager"></div>
+</div>
+
+<script>
+const RAW_DATA = /*__DATA__*/[]/*__DATA__*/;
+const GENERATED_AT = "__GENERATED_AT__";
+
+const CLASS_META = {
+  NEW_VENUE: {cls:'nv', label:'New venue'},
+  OPERATOR_CHANGE: {cls:'oc', label:'Operator change'},
+  UNKNOWN: {cls:'un', label:'Unknown'},
+};
+
+const state = {
+  search:'', confidence:'ALL', matchStatus:'ALL', classFilter:null,
+  sortField:'id', sortDir:'desc', page:1, pageSize:50, expanded:null,
+};
+
+function fmtDate(d){ return d || '—'; }
+
+function escapeHtml(s){
+  return (s==null?'':String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function computeStats(){
+  const c = {NEW_VENUE:0, OPERATOR_CHANGE:0, UNKNOWN:0, matched:0};
+  for(const r of RAW_DATA){
+    c[r.cl] = (c[r.cl]||0)+1;
+    if(r.ms) c.matched++;
+  }
+  return c;
+}
+
+function filteredSorted(){
+  let rows = RAW_DATA;
+  if(state.classFilter) rows = rows.filter(r => r.cl === state.classFilter);
+  if(state.confidence !== 'ALL') rows = rows.filter(r => r.cf === state.confidence);
+  if(state.matchStatus !== 'ALL') rows = rows.filter(r => state.matchStatus === 'yes' ? r.ms : !r.ms);
+  const q = state.search.trim().toLowerCase();
+  if(q){
+    rows = rows.filter(r =>
+      String(r.id).includes(q) ||
+      (r.n && r.n.toLowerCase().includes(q)) ||
+      (r.pc && r.pc.toLowerCase().includes(q)) ||
+      (r.au && r.au.toLowerCase().includes(q)) ||
+      (r.cn && r.cn.toLowerCase().includes(q)) ||
+      (r.cnm && r.cnm.toLowerCase().includes(q))
+    );
+  }
+  const f = state.sortField, dir = state.sortDir === 'asc' ? 1 : -1;
+  rows = rows.slice().sort((a,b) => {
+    let av = a[f], bv = b[f];
+    if(av==null) av='';
+    if(bv==null) bv='';
+    if(typeof av === 'string') return av.localeCompare(bv) * dir;
+    return (av - bv) * dir;
+  });
+  return rows;
+}
+
+function renderStats(){
+  const c = computeStats();
+  const chips = [
+    {key:null, cls:'', n:RAW_DATA.length, l:'All rows'},
+    {key:'NEW_VENUE', cls:'nv', n:c.NEW_VENUE, l:'New venue'},
+    {key:'OPERATOR_CHANGE', cls:'oc', n:c.OPERATOR_CHANGE, l:'Operator change'},
+    {key:'UNKNOWN', cls:'un', n:c.UNKNOWN, l:'Unknown'},
+  ];
+  document.getElementById('stats').innerHTML = chips.map(c2 => `
+    <div class="stat ${c2.cls} ${state.classFilter===c2.key ? 'active':''}" data-classfilter="${c2.key ?? ''}">
+      <span class="n">${c2.n.toLocaleString()}</span>
+      <span class="l">${c2.l}</span>
+    </div>`).join('') +
+    `<div class="stat ${state.matchStatus==='yes'?'active':''}" id="matchedChip"><span class="n">${c.matched.toLocaleString()}</span><span class="l">Has company match</span></div>`;
+
+  document.getElementById('stats').querySelectorAll('[data-classfilter]').forEach(el => {
+    el.addEventListener('click', () => {
+      const v = el.getAttribute('data-classfilter');
+      state.classFilter = v === '' ? null : v;
+      state.page = 1;
+      render();
+    });
+  });
+  document.getElementById('matchedChip').addEventListener('click', () => {
+    state.matchStatus = state.matchStatus === 'yes' ? 'ALL' : 'yes';
+    document.getElementById('matchFilter').value = state.matchStatus;
+    state.page=1; render();
+  });
+}
+
+function renderDetail(row){
+  const meta = CLASS_META[row.cl] || CLASS_META.UNKNOWN;
+  const previousRow = row.pbn ? `
+          <dt>Previously</dt><dd>"${escapeHtml(row.pbn)}"${row.pls ? `, last seen ${fmtDate(row.pls)}` : ''}</dd>` : '';
+  const companyRow = row.ms
+    ? `<dd>${escapeHtml(row.cnm||row.cn)} <span class="mono" style="color:var(--ink-dim);">(${escapeHtml(row.cn)})</span>${row.cst ? `, ${escapeHtml(row.cst)}` : ''}, inc. ${fmtDate(row.ic)}${row.sic ? `<br><span style="color:var(--ink-dim);font-size:12px;">SIC ${escapeHtml(row.sic)}</span>` : ''}</dd>`
+    : `<dd>No</dd>`;
+  const links = [
+    `<a class="btn" href="${escapeHtml(row.url)}" target="_blank" rel="noopener">FHRS record &rarr;</a>`,
+    row.gmu ? `<a class="btn ghost" href="${escapeHtml(row.gmu)}" target="_blank" rel="noopener">Map &rarr;</a>` : '',
+    row.chu ? `<a class="btn ghost" href="${escapeHtml(row.chu)}" target="_blank" rel="noopener">Companies House &rarr;</a>` : '',
+  ].filter(Boolean).join(' ');
+  return `
+    <div class="detail-inner">
+      <div>
+        <h4>Reason</h4>
+        <div class="reason">${escapeHtml(row.rs)}</div>
+      </div>
+      <div>
+        <h4>Details</h4>
+        <dl class="meta-grid">
+          <dt>Business type</dt><dd>${escapeHtml(row.bt)}</dd>
+          <dt>Rating status</dt><dd>${escapeHtml(row.rst)}</dd>
+          <dt>Postcode</dt><dd class="mono">${escapeHtml(row.pc||'—')} <span style="color:var(--ink-dim);">(${row.ac.replace('_',' ')})</span></dd>
+          <dt>Company match</dt>${companyRow}${previousRow}
+        </dl>
+        <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;">
+          ${links}
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderRows(){
+  const rows = filteredSorted();
+  document.getElementById('matchCount').textContent = rows.length.toLocaleString();
+
+  const start = (state.page-1)*state.pageSize;
+  const pageRows = rows.slice(start, start+state.pageSize);
+
+  const tbody = document.getElementById('tbody');
+  if(pageRows.length === 0){
+    tbody.innerHTML = `<tr><td colspan="7"><div class="empty">No rows match these filters.</div></td></tr>`;
+  } else {
+    tbody.innerHTML = pageRows.map(row => {
+      const meta = CLASS_META[row.cl] || CLASS_META.UNKNOWN;
+      const isExpanded = state.expanded === row.id;
+      return `
+        <tr class="row ${isExpanded?'expanded':''}" data-id="${row.id}">
+          <td class="id mono">${row.id}</td>
+          <td class="name">${escapeHtml(row.n)}</td>
+          <td class="addr">${escapeHtml(row.a||'')}<br><span class="pc mono">${escapeHtml(row.pc||'')}</span></td>
+          <td class="au">${escapeHtml(row.au||'')}</td>
+          <td><span class="pill ${meta.cls}"><span class="dot"></span>${meta.label}</span> <span class="conf ${row.cf}">${row.cf}</span></td>
+          <td><span class="matchdot ${row.ms?'yes':'no'}"></span>${row.ms ? 'Yes' : 'No'}</td>
+          <td class="mono">${fmtDate(row.fs)}</td>
+        </tr>
+        ${isExpanded ? `<tr class="detail"><td colspan="7">${renderDetail(row)}</td></tr>` : ''}
+      `;
+    }).join('');
+  }
+
+  tbody.querySelectorAll('tr.row').forEach(tr => {
+    tr.addEventListener('click', () => {
+      const id = Number(tr.getAttribute('data-id'));
+      state.expanded = state.expanded === id ? null : id;
+      render();
+    });
+  });
+
+  renderPager(rows.length);
+}
+
+function renderPager(total){
+  const pages = Math.max(1, Math.ceil(total/state.pageSize));
+  if(state.page > pages) state.page = pages;
+  document.getElementById('pager').innerHTML = `
+    <button id="prevPage" ${state.page<=1?'disabled':''}>&larr; Prev</button>
+    <span>Page <span class="mono">${state.page}</span> of <span class="mono">${pages}</span></span>
+    <button id="nextPage" ${state.page>=pages?'disabled':''}>Next &rarr;</button>
+  `;
+  const prev = document.getElementById('prevPage');
+  const next = document.getElementById('nextPage');
+  if(prev) prev.addEventListener('click', () => { state.page--; render(); });
+  if(next) next.addEventListener('click', () => { state.page++; render(); });
+}
+
+function renderSortHeaders(){
+  document.querySelectorAll('thead th[data-sort]').forEach(th => {
+    const f = th.getAttribute('data-sort');
+    th.classList.toggle('sorted', state.sortField===f);
+    th.querySelector('.arrow')?.remove();
+    if(state.sortField===f){
+      th.insertAdjacentHTML('beforeend', `<span class="arrow">${state.sortDir==='asc'?'↑':'↓'}</span>`);
+    }
+  });
+}
+
+function render(){
+  renderStats();
+  renderSortHeaders();
+  renderRows();
+}
+
+document.getElementById('search').addEventListener('input', (e) => {
+  state.search = e.target.value; state.page = 1; render();
+});
+document.getElementById('confFilter').addEventListener('change', (e) => {
+  state.confidence = e.target.value; state.page = 1; render();
+});
+document.getElementById('matchFilter').addEventListener('change', (e) => {
+  state.matchStatus = e.target.value; state.page = 1; render();
+});
+document.querySelectorAll('thead th[data-sort]').forEach(th => {
+  th.addEventListener('click', () => {
+    const f = th.getAttribute('data-sort');
+    if(state.sortField === f){ state.sortDir = state.sortDir==='asc'?'desc':'asc'; }
+    else { state.sortField = f; state.sortDir = 'asc'; }
+    render();
+  });
+});
+
+document.getElementById('asOf').textContent = GENERATED_AT;
+
+render();
+</script>
+
+</body></html>

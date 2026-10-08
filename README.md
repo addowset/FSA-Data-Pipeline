@@ -894,6 +894,31 @@ This is a pure filter over existing data, not a new stored field --
 `evidence_company_number` was already null exactly when there's nothing
 to sell.
 
+## Venue Feed page
+
+A published, private Artifact for browsing a CSV export in the browser:
+search, filter by classification/confidence/company match, and expand
+any row for its reason, company details and FHRS/Maps/Companies House
+links. Unlike the Match Ledger it shows exactly what one export
+contained -- it's built from the CSV file, not the database.
+
+`tools/venue_feed_template.html` is the page source (CSS + JS, no data).
+`scripts/export_venue_feed.py` splices a CSV into it and writes
+`tools/venue_feed.html` (gitignored). By default it uses the newest
+`venues_YYYY-MM-DD.csv` in `exports/Venue CSV/` (falling back to
+`exports/`), picked by the date in the filename:
+
+```bash
+python scripts/export_venue_feed.py
+```
+
+The artifact does **not** update on its own when a new CSV is written.
+After rebuilding, ask Claude to republish `tools/venue_feed.html` to the
+existing artifact (URL in the assistant's memory). The script warns as
+the page nears the 16 MB artifact limit (6.5 MB at 12,471 rows,
+2026-10-07, growing roughly 0.7 MB/week); past that point the data needs
+to be published as a separate file rather than embedded.
+
 ## Running tests
 
 ```bash
@@ -909,7 +934,7 @@ scripts/              entry-point scripts: collect_fhrs_bulk.py, parse_fhrs_bulk
                         diff_fhrs.py, collect_companies_house.py, parse_companies_house.py,
                         lookup_operator_companies.py, match_companies_house.py,
                         backfill_postcodes.py, classify_insertions.py, monitor_pipeline.py,
-                        export_csv.py, rebuild_db.py, run_daily.ps1 (scheduled task entry point)
+                        export_csv.py, export_venue_feed.py, rebuild_db.py, run_daily.ps1 (scheduled task entry point)
 raw/                  raw archive, gitignored — this is the asset, back it up separately
   fhrs/<date>/        one dated directory per collection run
     _authorities-index.xml.gz   that day's local-authority list, as returned by the API
