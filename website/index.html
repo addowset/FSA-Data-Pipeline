@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Opendo — new UK food and drink venues, every week</title>
+<meta name="description" content="Every new café, restaurant, pub, bar, hotel, takeaway and food shop registered with a UK local council, as a spreadsheet, every week.">
+<meta name="robots" content="index, follow">
+<meta property="og:title" content="Opendo">
+<meta property="og:description" content="Every new café, restaurant, pub, bar, hotel, takeaway and food shop registered with a UK local council, as a spreadsheet, every week.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='5' fill='%231d5748'/%3E%3Ctext x='16' y='23' font-family='Georgia,serif' font-size='20' fill='%23f3f6f3' text-anchor='middle'%3EO%3C/text%3E%3C/svg%3E">
+<style>
+/* Layout: one narrow reading column, left aligned, with the week's register
+   breaking out to full width as the page's only wide element. */
+:root{
+  --ground:#f3f5f3;
+  --surface:#ffffff;
+  --ink:#141a18;
+  --muted:#5b6a64;
+  --rule:#d7ddd9;
+  --accent:#1d5748;
+  --accent-soft:#e4ede9;
+  --new:#1d5748;
+  --changed:#3c5670;
+  --display:Georgia,"Iowan Old Style","Palatino Linotype",Palatino,"Times New Roman",serif;
+  --body:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ground:#0f1412;
+    --surface:#161d1a;
+    --ink:#e7ece9;
+    --muted:#9aa8a2;
+    --rule:#2a3531;
+    --accent:#6fbfa6;
+    --accent-soft:#1b2723;
+    --new:#6fbfa6;
+    --changed:#8fb0cf;
+    color-scheme:dark;
+  }
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;
+  background:var(--ground);
+  color:var(--ink);
+  font:400 17px/1.6 var(--body);
+}
+.wrap{
+  max-width:52rem;
+  margin:0 auto;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));
+}
+.wide{max-width:52rem}
+h1,h2,h3{font-family:var(--display);font-weight:400;text-wrap:balance;margin:0}
+p{margin:0}
+a{color:var(--accent)}
+a:focus-visible,.mail:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:2px}
+
+/* masthead */
+header{border-bottom:1px solid var(--rule);background:var(--surface)}
+header .wrap{padding-block:2.4rem 2rem;display:flex;flex-direction:column;gap:.9rem}
+.mark{
+  font-family:var(--display);font-size:1.5rem;letter-spacing:.01em;
+  display:flex;align-items:baseline;gap:.55rem;
+}
+.mark b{font-weight:400}
+.mark span{
+  font:500 .68rem/1 var(--body);letter-spacing:.14em;text-transform:uppercase;
+  color:var(--muted);
+}
+header h1{font-size:clamp(1.75rem,5.4vw,2.6rem);line-height:1.18;max-width:28ch}
+header .sub{color:var(--muted);max-width:52ch}
+
+/* sections */
+main .wrap{padding-block:2.6rem}
+section+section .wrap{padding-top:0}
+h2{
+  font:500 .68rem/1 var(--body);letter-spacing:.14em;text-transform:uppercase;
+  color:var(--muted);margin-bottom:1rem;
+}
+.prose{display:flex;flex-direction:column;gap:1rem;max-width:40rem}
+.prose p{max-width:66ch}
+
+/* figures */
+.figures{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));
+  gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:3px;overflow:hidden;
+}
+.fig{background:var(--surface);padding:1.15rem 1.25rem;min-width:0}
+.fig b{
+  display:block;font-family:var(--display);font-size:2rem;line-height:1.1;
+  font-variant-numeric:tabular-nums;font-weight:400;
+}
+.fig small{display:block;margin-top:.35rem;font-size:.86rem;color:var(--muted)}
+
+/* the register */
+.tablewrap{
+  overflow-x:auto;border:1px solid var(--rule);border-radius:3px;background:var(--surface);
+}
+table{border-collapse:collapse;width:100%;min-width:40rem;font-size:.9rem}
+caption{
+  text-align:left;padding:.9rem 1.1rem;border-bottom:1px solid var(--rule);
+  color:var(--muted);font-size:.86rem;
+}
+th{
+  text-align:left;font:500 .68rem/1 var(--body);letter-spacing:.1em;text-transform:uppercase;
+  color:var(--muted);padding:.7rem 1.1rem;border-bottom:1px solid var(--rule);white-space:nowrap;
+}
+td{padding:.7rem 1.1rem;border-bottom:1px solid var(--rule);vertical-align:top}
+tbody tr:last-child td{border-bottom:0}
+td.name{font-weight:600}
+td.pc{font-family:var(--mono);font-size:.84rem;white-space:nowrap;font-variant-numeric:tabular-nums}
+.prev{color:var(--muted);font-size:.82rem;margin-top:.3rem;line-height:1.35}
+.tag{
+  display:inline-block;font:500 .7rem/1 var(--body);letter-spacing:.04em;
+  padding:.3rem .5rem;border-radius:2px;white-space:nowrap;
+}
+.tag.n{color:var(--new);background:var(--accent-soft)}
+.tag.c{color:var(--changed);border:1px solid var(--rule)}
+
+/* lists */
+ul.points{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.7rem;max-width:40rem}
+ul.points li{padding-left:1.15rem;position:relative}
+ul.points li::before{
+  content:"";position:absolute;left:0;top:.62rem;width:.42rem;height:.42rem;
+  background:var(--accent);border-radius:50%;
+}
+
+/* contact */
+.contact{
+  background:var(--surface);border:1px solid var(--rule);border-radius:3px;
+  padding:1.4rem 1.5rem;display:flex;flex-direction:column;gap:.7rem;max-width:40rem;
+}
+.contact p{max-width:52ch}
+.mail{
+  font-family:var(--mono);font-size:1.02rem;color:var(--accent);
+  text-decoration:none;border-bottom:1px solid var(--rule);align-self:flex-start;
+  padding-bottom:.1rem;word-break:break-all;
+}
+.mail:hover{border-bottom-color:var(--accent)}
+
+/* footer */
+footer{border-top:1px solid var(--rule);margin-top:2.6rem;background:var(--surface)}
+footer .wrap{padding-block:2rem 2.6rem;display:flex;flex-direction:column;gap:1rem}
+footer h2{margin-bottom:.5rem}
+footer p{font-size:.86rem;color:var(--muted);max-width:72ch}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <p class="mark"><b>Opendo</b> <span>Bristol</span></p>
+    <h1>New UK food and drink venues, every week.</h1>
+    <p class="sub">Every café, restaurant, pub, bar, hotel, takeaway and food shop that registered with a UK local council last week — as a spreadsheet, in your inbox.</p>
+  </div>
+</header>
+
+<main>
+
+  <section>
+    <div class="wrap">
+      <div class="prose">
+        <p>Nothing can open and serve food in the United Kingdom without first registering with its local council. There are 363 of those councils, each publishing its own register, in its own time, in its own format. Opendo reads all of them every day.</p>
+        <p>What comes out is the week's new venues: trading name, full street address, postcode, the kind of premises it is, and whether it is a brand-new opening or an existing site taken over by a new operator. Just over half are takeovers, which is the part most supplier lists miss entirely — the site was already there, but the person buying the coffee, the insurance and the waste collection has just changed.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Last week</h2>
+      <div class="figures">
+        <div class="fig"><b>363</b><small>local authority registers, read every day</small></div>
+        <div class="fig"><b>230</b><small>new venues in the week to 22 October 2026</small></div>
+        <div class="fig"><b>52%</b><small>a change of operator, not a new opening</small></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap wide">
+      <h2>A sample of the week</h2>
+      <div class="tablewrap">
+        <table>
+          <caption>Eight of the 230 venues registered in the week to 22 October 2026.</caption>
+          <thead>
+            <tr>
+              <th scope="col">Venue</th>
+              <th scope="col">Address</th>
+              <th scope="col">Postcode</th>
+              <th scope="col">Premises</th>
+              <th scope="col">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="name">Cobblestone Café</td>
+              <td>69 Elm Row, Edinburgh</td>
+              <td class="pc">EH7 4AQ</td>
+              <td>Café / restaurant</td>
+              <td><span class="tag n">New opening</span></td>
+            </tr>
+            <tr>
+              <td class="name">Rosie O'Learys</td>
+              <td>75–83 Westgate, Wakefield</td>
+              <td class="pc">WF1 1EP</td>
+              <td>Pub / bar</td>
+              <td><span class="tag c">Change of hands</span><div class="prev">from The Establishment</div></td>
+            </tr>
+            <tr>
+              <td class="name">The Cheese Shop</td>
+              <td>108 Eastgate, Louth, Lincolnshire</td>
+              <td class="pc">LN11 9AA</td>
+              <td>Food shop</td>
+              <td><span class="tag c">Change of hands</span><div class="prev">from Meridian Meats</div></td>
+            </tr>
+            <tr>
+              <td class="name">Cafe25</td>
+              <td>2 Market Square, Southwell</td>
+              <td class="pc">NG25 0FS</td>
+              <td>Café / restaurant</td>
+              <td><span class="tag c">Change of hands</span><div class="prev">from Jack Dempsie's</div></td>
+            </tr>
+            <tr>
+              <td class="name">The Driftwood Bakehouse</td>
+              <td>North Greenwich Road, Spittal, Northumberland</td>
+              <td class="pc">TD15 1RG</td>
+              <td>Café / restaurant</td>
+              <td><span class="tag n">New opening</span></td>
+            </tr>
+            <tr>
+              <td class="name">Sanctuary Bar</td>
+              <td>72 Lime Street, Liverpool</td>
+              <td class="pc">L1 1JN</td>
+              <td>Pub / bar</td>
+              <td><span class="tag c">Change of hands</span><div class="prev">from MOMOS</div></td>
+            </tr>
+            <tr>
+              <td class="name">The Hungry Sultan</td>
+              <td>17 Donegall Road, Belfast</td>
+              <td class="pc">BT12 5JJ</td>
+              <td>Café / restaurant</td>
+              <td><span class="tag n">New opening</span></td>
+            </tr>
+            <tr>
+              <td class="name">Anchor &amp; Batter</td>
+              <td>96 London Road, St Albans, Hertfordshire</td>
+              <td class="pc">AL1 1NX</td>
+              <td>Takeaway</td>
+              <td><span class="tag c">Change of hands</span><div class="prev">from Swadisht</div></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>What arrives</h2>
+      <ul class="points">
+        <li>One spreadsheet a week, by email. It opens in Excel, Numbers or Google Sheets.</li>
+        <li>Trading name, full address, postcode and premises type for every venue.</li>
+        <li>New opening or change of operator, with the previous occupier named where there was one.</li>
+        <li>Cut to the area you actually cover — by council, county or region — or the whole United Kingdom.</li>
+        <li>Chains, schools, hospitals, care homes and councils re-issuing an existing record are taken out before you see it.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Who it is for</h2>
+      <div class="prose">
+        <p>Anyone who would rather hear about a venue in its first week than its fifth year: coffee roasters and food wholesalers, insurance brokers, cleaning and waste contractors, equipment suppliers and shopfitters, and the trades that work on a kitchen before it opens.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Get in touch</h2>
+      <div class="contact">
+        <p>Tell me the area you cover and I will send you that week's venues for it.</p>
+        <a class="mail" href="mailto:andrew@opendo.co.uk">andrew@opendo.co.uk</a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div>
+      <h2>Privacy</h2>
+      <p>Opendo holds business contact details — a company name, a business email address published on that company's own website, and the page it was read from — and uses them to introduce this service to businesses that may want it. Nothing is sold or passed to anyone else. To be removed, reply to any email from Opendo or write to andrew@opendo.co.uk, and the address is suppressed permanently.</p>
+    </div>
+    <div>
+      <h2>Sources</h2>
+      <p>Built on the food business registers published by UK local authorities through the Food Standards Agency. Contains public sector information licensed under the <a href="https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/" rel="noopener">Open Government Licence v3.0</a>. Opendo is not affiliated with or endorsed by the Food Standards Agency.</p>
+    </div>
+    <p>Opendo is run by Andrew Dowsett in Bristol, United Kingdom.</p>
+  </div>
+</footer>
+
+</body>
+</html>
