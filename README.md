@@ -871,6 +871,83 @@ See "Design notes" for the column choices (`match_status` and
 guard fix this surfaced, and the FHRSID-based classification idea that
 was checked and rejected.
 
+## Running the customer report
+
+`export_csv.py` is the database export: everything, every business type, every
+classification, for your own use. This is the other end of the same data -- one
+territory, one week, filtered down to venues a supplier can sell to, as a
+workbook rather than a CSV. It is what gets attached to a reply.
+
+```bash
+python scripts/export_report.py --territory Yorkshire --audience broker
+python scripts/export_report.py --territory "the East Midlands" --days 7
+python scripts/export_report.py --territory Cheshire --customer "R K Henshall"
+python scripts/export_report.py --territory UK --since 2026-10-16 --until 2026-10-22
+```
+
+Writes `exports/reports/new-venues_<territory>_<date>.xlsx` unless `--output`
+says otherwise, and logs the accuracy stamp it put in the file. Quote that
+stamp in the covering email so the message and the attachment agree.
+
+**`--territory`** takes what a supplier actually wrote: a region ("the North
+West"), a county ("Cambridgeshire", "notts", "glos"), a city ("Bristol"), an
+exact council name, or "UK". `fsa_pipeline/territories.py` resolves it to a set
+of local authorities, reading the twelve regions from the `authorities` table so
+they cannot drift from the database. An unknown name is an error, not a guess --
+a report quietly built on a half-understood territory is worse than one that was
+never sent, because nobody finds out until the customer reads it. Add new names
+to the `CITIES` or `COUNTIES` dicts; `territories.validate()` checks every name
+in them still exists in the table, which matters because councils reorganise
+(Cumbria became Cumberland and Westmorland and Furness in 2023).
+
+Authorities and not postcode areas, because postcode areas cross county lines
+freely: CB reaches into Essex, PE deep into Lincolnshire, S across Derbyshire
+and Doncaster. A Cambridge roaster sent "Cambridgeshire" venues in Saffron
+Walden and Old Leake can see the territory filter is wrong at a glance, and that
+is the first impression the report gets to make.
+
+**`--audience`** decides which premises types count: `roaster` (cafes,
+restaurants, pubs, hotels), `broker` (plus takeaways), `waste` (plus shops and
+mobile caterers), `all`. One audience's noise is another's lead, so this is a
+parameter rather than a constant.
+
+**What `fsa_pipeline/report_filter.py` removes**, in rough order of volume:
+UNKNOWN classifications (the classifier could not confirm a new opening or a
+change of hands, and "we are not sure" is not a product), premises types outside
+the audience, records with no usable street address, chains, school/hospital/
+prison kitchens typed as cafes, and FHRSID re-issues where a council
+re-registered the same business under a new reference. On the week to
+2026-10-22 that took 2,123 raw records to 228 nationally -- the unfiltered
+number is roughly nine times the sellable one, so quoting it in an email would
+be contradicted by the attachment.
+
+Two filtering details worth keeping:
+
+- Chains are matched two ways. Long unambiguous stems ("morrison", "sainsbury")
+  are matched against the name *and address* with punctuation stripped, which is
+  what catches "Canteen Flaxby Produce, WM MORRISON PRODUCE LTD" -- the register
+  spells it singular and buries it in the address. Short stems ("spar", "nisa",
+  "costa") are matched on word boundaries only, because deleting a real
+  independent called The Sparrow from a customer's list is a worse failure than
+  leaving a chain in it.
+- Contract caterers inside a host site are **not** filtered, deliberately. The
+  obvious rule would be "within" in the address, but over seven weeks that
+  matched four venues and three of them (Cheat Lab, Fuel Factory, Oppa Kitchen)
+  were street-food traders in markets and food halls -- real leads. A rule that
+  is wrong three times out of four is worse than the problem.
+
+**The workbook** has two tabs. "New venues" is the list, with changes of hands
+shaded. "About this report" carries the accuracy stamp, what was taken out and
+how many, what each column means, and the OGL attribution. Company columns are
+filled only where the match is corroborated by an exact registered-address hit;
+of 102 company numbers checked by hand on the supplier list, four were the wrong
+company, and a customer cannot tell a wrong company name from a right one.
+
+No hygiene rating appears anywhere in the file. The FSA's terms require a
+displayed rating to be current or to carry the date it was accurate as of, and
+showing a stale one can be an offence. Nobody is buying the rating, so the
+obligation is not worth taking on. See "Data licensing".
+
 ## Rebuilding the database
 
 The database is derived, rebuildable state; the raw archive is the actual
