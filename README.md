@@ -1876,6 +1876,17 @@ Any output derived from this pipeline that's shared externally should carry
 the attribution: *"Contains public sector information licensed under the
 Open Government Licence v3.0."*
 
+OGL does not cover everything in the FHRS feed. Some council-derived
+coordinates carry Ordnance Survey PSMA licensing restrictions, which OGL
+attribution does not discharge, so `latitude` and `longitude` were dropped
+from the CSV export on 2026-10-23 (`fsa_pipeline/csv_export.py`,
+`EXPORT_FIELDNAMES`). They are still collected and still stored -- this is an
+export-scope decision, the same treatment as `NOISE_BUSINESS_TYPES` -- but
+nothing OS-derived now leaves the pipeline. `google_maps_url` is unaffected:
+it is a Google Maps search query built from the address and postcode, with no
+coordinates in it. If coordinates are wanted in an export again, geocode from
+the address independently rather than passing the feed's through.
+
 ## Privacy
 
 This pipeline collects and stores company-level data only: business names,

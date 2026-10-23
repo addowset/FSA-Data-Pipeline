@@ -109,6 +109,20 @@ def is_noise_business_type(business_type: str | None) -> bool:
 # construction, matched companies are never anything else; "town" --
 # address lines aren't consistently ordered enough to extract one
 # reliably, not built).
+#
+# latitude/longitude REMOVED 2026-10-23, at the user's request and for a
+# second reason worth recording. Some council-derived coordinates in the
+# FHRS feed carry Ordnance Survey PSMA licensing restrictions, so shipping
+# them to a paying customer redistributes OS-derived geometry under a
+# licence we do not hold -- the one compliance exposure in this export that
+# OGL attribution does not cover. They were also the least used columns in
+# the file. google_maps_url STAYS: it is built from the address and
+# postcode (see google_maps_url below), a Google Maps search query with no
+# coordinates in it, so it carries no OS data. The columns remain in the
+# database and in the SELECT below; this is an export-scope decision, not a
+# collection one, matching how NOISE_BUSINESS_TYPES is handled. If
+# coordinates are ever wanted again, geocode from the address independently
+# rather than passing these through.
 EXPORT_FIELDNAMES = [
     "fhrsid",
     "business_name",
@@ -116,8 +130,6 @@ EXPORT_FIELDNAMES = [
     "postcode",
     "postcode_source",
     "address_completeness",
-    "latitude",
-    "longitude",
     "google_maps_url",
     "authority_name",
     "authority_extract_date",
@@ -297,8 +309,6 @@ def build_row(record: dict) -> dict:
             record["address_line_1"], record["address_line_2"], record["address_line_3"],
             record["address_line_4"], postcode,
         ),
-        "latitude": record["latitude"] if record["latitude"] is not None else "",
-        "longitude": record["longitude"] if record["longitude"] is not None else "",
         "google_maps_url": google_maps_url(address, postcode),
         "authority_name": record["authority_name"],
         "authority_extract_date": record["authority_extract_date"] or "",
