@@ -18,3 +18,6 @@ tools/audit_data.json
 tools/audit_ledger.html
 # Built by scripts/export_venue_feed.py from tools/venue_feed_template.html.
 tools/venue_feed.html
+
+# Artifacts of the remote-device FUSE mount, not project files.
+.fuse_hidden*
