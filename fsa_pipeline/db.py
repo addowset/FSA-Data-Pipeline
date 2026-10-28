@@ -349,6 +349,40 @@ CREATE TABLE IF NOT EXISTS operator_search_checks (
     checked_at TEXT NOT NULL,
     UNIQUE(operator_prefix)
 );
+
+-- Who receives a weekly report, and which week each of them is owed. Delivery
+-- state, deliberately here rather than in the lead workbook: a scheduled
+-- script cannot read a spreadsheet that Excel may have open, and the window
+-- arithmetic has to be reliable. The workbook stays the sales record; these
+-- two tables are the despatch log. They are linked by customer name.
+CREATE TABLE IF NOT EXISTS report_subscribers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_name TEXT NOT NULL,
+    email TEXT,
+    territory TEXT NOT NULL,
+    audience TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1,
+    -- The day BEFORE their first window: set it to the end date of the
+    -- one-off report they were sent when they replied, so the first weekly
+    -- carries straight on from the sample they have already read.
+    started_date TEXT NOT NULL,
+    notes TEXT
+);
+
+-- One row per report generated. since/until is the record that makes the next
+-- window computable: the following report starts the day after until, so no
+-- irregularity in when reports go out can open a gap or repeat a day.
+CREATE TABLE IF NOT EXISTS report_issues (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    subscriber_id INTEGER NOT NULL REFERENCES report_subscribers(id),
+    since TEXT NOT NULL,
+    until TEXT NOT NULL,
+    venue_count INTEGER NOT NULL,
+    generated_at TEXT NOT NULL,
+    output_path TEXT,
+    sent_date TEXT,
+    UNIQUE(subscriber_id, since, until)
+);
 """
 
 # Columns added to establishments_current after it was already in use in

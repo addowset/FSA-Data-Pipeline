@@ -165,10 +165,47 @@ Andrew Dowsett
 Opendo
 ```
 
+### 5. A week with nothing in it
+
+Weekly means weekly, so this still goes out. But the first line has to say there is nothing in
+it. A subscriber who opens an empty attachment expecting venues does not think "quiet week", they
+think the report is broken — and that is a worse impression than the quiet week itself.
+
+```
+Hi [Name],
+
+Nothing this week. No cafés, restaurants, pubs or hotels registered in
+[territory] between [since] and [until].
+
+[[N] food businesses did register there — takeaways and shops rather than
+venues you'd sell to. The attached file's second tab lists what came up and
+why it was filtered out.]
+
+The file's attached so you've got the week on record, but it's empty — I'd
+rather say so here than have you open it wondering what went wrong.
+
+Andrew Dowsett
+Opendo, 54 Beverley Road, Bristol BS7 0JN
+```
+
+Two versions of the middle paragraph, and the difference matters to the reader:
+
+- **Registrations happened, none were sellable.** Cambridgeshire produced 30 register entries in
+  the week to 22 October and not one was a café, restaurant, pub or hotel. That is a fact about
+  the filter working, and it is worth telling them.
+- **Nothing registered at all.** Rarer, and a different message: their patch was quiet, not their
+  filter narrow. Drop the middle paragraph entirely.
+
+`scripts/export_report.py` tells you which case you are in. On an empty report it logs the venue
+count, the number of register entries that were in the territory anyway, and a reminder to lead
+the email with it.
+
 ### Decisions behind these
 
 **The weekly is opt-in, not opt-out.** "Say the word and I'll add you" means nobody is subscribed
-by default. The alternative — sending weekly until told to stop — keeps more names on the list,
+by default. When they do say the word, add them with `scripts/subscribers.py add`, passing
+`--from` set to the end date of the sample report they already received, so their first weekly
+carries straight on from it with no gap and nothing they have read twice. The alternative — sending weekly until told to stop — keeps more names on the list,
 but it makes "yes, weekly" a deliberate act rather than a reply they would have sent anyway, and
 that is a far stronger signal than a reply on its own. The decision rules on the workbook's
 Results tab treat 15 territory requests as the threshold for real; a weekly opt-in is better

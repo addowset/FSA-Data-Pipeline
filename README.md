@@ -948,6 +948,68 @@ displayed rating to be current or to carry the date it was accurate as of, and
 showing a stale one can be an offence. Nobody is buying the rating, so the
 obligation is not worth taking on. See "Data licensing".
 
+## Weekly reports: who gets what, and which week
+
+`export_report.py --territory` is for answering a reply: one report, stateless,
+nothing recorded. For a subscriber on a weekly, the window must not be a
+parameter at all.
+
+```bash
+python scripts/subscribers.py add "Lee & Fletcher" --territory "the East Midlands" \
+    --audience roaster --email julie@example.com --from 2026-10-22
+python scripts/export_report.py --subscriber "Lee & Fletcher"
+python scripts/subscribers.py sent 1
+```
+
+`--from` is the end date of the one-off report they were sent when they replied.
+Their first weekly then starts the day after it, so they get no gap and nothing
+they have already read. Leave it off and anything registered between their
+sample and their subscription reaches them never.
+
+**Why the window is derived rather than given.** The original version built every
+report for "the last seven days" counted back from whenever the script ran.
+Three ways that goes wrong, and the third needs no carelessness:
+
+- *Gap.* Send on Tuesday the 3rd (28 Oct to 3 Nov), then not until Thursday the
+  12th (6 to 12 Nov). The 4th and 5th are in nobody's report and nothing says so.
+- *Overlap.* Send on the 3rd, then the 9th (3 to 9 Nov). The 3rd goes out twice,
+  so the same venues appear in consecutive reports.
+- *Lost day.* Collection runs at 11:00. Generate at 09:00 and today's venues do
+  not exist yet, but the next window starts tomorrow, so that day is skipped
+  permanently. This one happens on a perfect weekly schedule.
+
+So `since` comes from a fact rather than an argument: the end date of that
+subscriber's last report, plus a day (`report_issues`). A gap cannot open
+however irregularly reports go out. And `until` is the last date at least 90% of
+the 363 authorities were collected on, not today, which kills the third case —
+a day that was only half collected waits for the next report rather than falling
+between the two.
+
+**Two tables**, created by `db.connect()` like the rest of the schema.
+`report_subscribers` is customer, territory, audience, active, start date.
+`report_issues` is one row per report generated: window, venue count, when,
+where the file went, whether it was sent. Unique on (subscriber, since, until).
+
+Deliberately in the database rather than in the lead workbook: a scheduled
+script cannot read a spreadsheet Excel may have open, and this arithmetic has to
+be reliable. `docs/leads_all_three_categories.xlsx` stays the sales record and
+these tables are the despatch log; they are linked by customer name.
+
+**Other behaviour worth knowing.** Running twice in a day refuses rather than
+producing an empty duplicate — `--redo` rebuilds the last report from its stored
+window without advancing, for when a send failed. `subscribers.py list` flags
+issues generated but never marked sent, because an unsent issue has already
+moved that subscriber's window on, so its venues will not appear in their next
+report either. Pausing and resuming backfills: the next window still starts the
+day after the last report, however long the pause was.
+
+**An empty week is still a report.** It is sent, the window advances, and the
+issue is recorded with a count of zero. The script logs how many register
+entries were in the territory anyway, because "30 registered, none were venues
+you can sell to" is a different message to the customer from "nothing happened",
+and the covering email has to lead with whichever it is. See
+`docs/email-variants-category1-roasters.md`.
+
 ## Rebuilding the database
 
 The database is derived, rebuildable state; the raw archive is the actual
