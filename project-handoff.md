@@ -77,7 +77,7 @@ match for this establishment's address" reason string is only emitted after the
 470-row union of both address-match wordings is the honest version.
 
 Full working is on the Method & caveats tab of
-`exports/leads_all_three_categories.xlsx`.
+`docs/leads_all_three_categories.xlsx`.
 
 ### 2.2 FHRSID numbering (LOGGED, DO NOT ACT)
 
@@ -209,7 +209,7 @@ spike rather than count as a week of trading.
 
 ### Decision rules
 
-Moved to the **Results** tab of `exports/leads_all_three_categories.xlsx` on
+Moved to the **Results** tab of `docs/leads_all_three_categories.xlsx` on
 23 October 2026, so they sit beside the bite-rate formulas they are read
 against. Unchanged in substance. The thresholds were set against about 190
 sendable rows and the list is now 174, which leaves "fewer than 8 replies" a

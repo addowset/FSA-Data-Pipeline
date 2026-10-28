@@ -1093,6 +1093,13 @@ logs/                 per-run logs, gitignored
   _alerts_<date>.log          stage 6's alerts, only present when a check fired
 exports/              stage 7's CSV deliverables, gitignored (can contain a buyer's feed)
   venues_<date>.csv           one export per run, unless --output overrides the path
+  reports/                    customer workbooks from export_report.py
+docs/                 hand-made and tracked, unlike everything in exports/. These are
+                        the only files in the project with no upstream source: lose one
+                        and no amount of reprocessing raw/ brings it back.
+  leads_all_three_categories.xlsx   the supplier list and its send/reply tracking
+  email-variants-category1-roasters.md   outreach and reply copy, with the reasoning
+  lead-list-build-summary.md        how the list was researched
 config.toml           non-secret configuration (URLs, timeouts, contact email)
 fsa_pipeline.db        SQLite database, gitignored (this is derived state -- rebuildable
                         from raw/ by reparsing, unlike raw/ itself)

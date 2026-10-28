@@ -1,5 +1,7 @@
 raw/
 logs/
+# Generated output only. Hand-made files that cannot be rebuilt -- the lead
+# list, the email copy -- live in docs/ and are tracked.
 exports/
 .env
 *.db
