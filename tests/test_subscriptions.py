@@ -13,6 +13,10 @@ def conn():
         CREATE TABLE authorities (code INTEGER, name TEXT, region_name TEXT);
         CREATE TABLE collection_runs (
             authority_code INTEGER, collection_date TEXT, status TEXT);
+        CREATE TABLE diff_runs (authority_code INTEGER, collection_date TEXT);
+        CREATE TABLE diff_events (
+            fhrsid INTEGER, collection_date TEXT, event_type TEXT, quarantined INTEGER);
+        CREATE TABLE classifications (fhrsid INTEGER, insert_collection_date TEXT);
         CREATE TABLE report_subscribers (
             id INTEGER PRIMARY KEY AUTOINCREMENT, customer_name TEXT NOT NULL,
             email TEXT, territory TEXT NOT NULL, audience TEXT NOT NULL,
@@ -28,11 +32,27 @@ def conn():
     return conn
 
 
-def collected(conn, date, ok=10):
+def collected(conn, date, ok=10, diffed=True, inserts=0, classified=None):
+    """A day the pipeline has been through.
+
+    Defaults to fully processed with nothing registered, which is what most of
+    these tests want. Pass diffed=False or classified=0 to simulate a report
+    generated part way through the daily run.
+    """
     conn.executemany(
         "INSERT INTO collection_runs VALUES (?, ?, ?)",
         [(i, date, "ok" if i < ok else "failed") for i in range(10)],
     )
+    if diffed:
+        conn.executemany("INSERT INTO diff_runs VALUES (?, ?)",
+                         [(i, date) for i in range(10)])
+    classified = inserts if classified is None else classified
+    for n in range(inserts):
+        conn.execute("INSERT INTO diff_events VALUES (?, ?, 'INSERT', 0)",
+                     (hash((date, n)) % 100000, date))
+    for n in range(classified):
+        conn.execute("INSERT INTO classifications VALUES (?, ?)",
+                     (hash((date, n)) % 100000, date))
 
 
 def subscriber(conn, started="2026-10-22"):
@@ -59,6 +79,67 @@ def test_a_few_failed_authorities_still_counts_as_complete(conn):
 
 def test_no_collection_at_all(conn):
     assert subscriptions.last_complete_collection_date(conn) is None
+
+
+def test_a_day_collected_but_not_yet_diffed_is_not_reportable(conn):
+    # run_daily.ps1 collects first and classifies ninth. A report built in
+    # between would find today's venues missing and still move the window past
+    # them, which is the loss this module exists to prevent, one stage lower.
+    collected(conn, "2026-10-26", inserts=5)
+    collected(conn, "2026-10-27", diffed=False)
+    assert subscriptions.last_reportable_date(conn) == "2026-10-26"
+
+
+def test_a_day_diffed_but_not_yet_classified_is_not_reportable(conn):
+    collected(conn, "2026-10-26", inserts=5)
+    collected(conn, "2026-10-27", inserts=4, classified=0)
+    assert subscriptions.last_reportable_date(conn) == "2026-10-26"
+
+
+def test_a_part_classified_day_is_not_reportable(conn):
+    # The run died half way through classify_insertions.py.
+    collected(conn, "2026-10-26", inserts=5)
+    collected(conn, "2026-10-27", inserts=4, classified=2)
+    assert subscriptions.last_reportable_date(conn) == "2026-10-26"
+
+
+def test_once_classified_the_day_becomes_reportable(conn):
+    collected(conn, "2026-10-26", inserts=5)
+    collected(conn, "2026-10-27", inserts=4)
+    assert subscriptions.last_reportable_date(conn) == "2026-10-27"
+
+
+def test_a_quiet_day_with_no_registrations_does_not_stall_the_window(conn):
+    # Sundays here produce nothing. A day with no INSERT events is fully
+    # processed by definition and must not hold reports back.
+    collected(conn, "2026-10-27", inserts=4)
+    collected(conn, "2026-10-28", inserts=0)
+    assert subscriptions.last_reportable_date(conn) == "2026-10-28"
+
+
+def test_the_window_ends_at_the_last_reportable_day_not_the_last_collected(conn):
+    collected(conn, "2026-10-27", inserts=4)
+    collected(conn, "2026-10-28", diffed=False)
+    sub = subscriber(conn, started="2026-10-22")
+    assert subscriptions.last_complete_collection_date(conn) == "2026-10-28"
+    assert subscriptions.next_window(conn, sub) == ("2026-10-23", "2026-10-27")
+
+
+def test_mid_run_generation_defers_rather_than_loses(conn):
+    # Generate while the daily run is still going: today is excluded, and the
+    # NEXT report picks it up rather than skipping it.
+    collected(conn, "2026-10-27", inserts=4)
+    collected(conn, "2026-10-28", inserts=9, classified=0)
+    sub = subscriber(conn, started="2026-10-22")
+    since, until = subscriptions.next_window(conn, sub)
+    assert until == "2026-10-27"
+    subscriptions.record_issue(conn, subscriber_id=sub["id"], since=since,
+                               until=until, venue_count=4)
+    # the run finishes
+    for n in range(9):
+        conn.execute("INSERT INTO classifications VALUES (?, ?)",
+                     (hash(("2026-10-28", n)) % 100000, "2026-10-28"))
+    assert subscriptions.next_window(conn, sub) == ("2026-10-28", "2026-10-28")
 
 
 # --- the start of the window ------------------------------------------------
@@ -137,7 +218,7 @@ def test_a_week_with_no_venues_is_still_a_real_window(conn):
     assert subscriptions.next_window(conn, sub) == ("2026-10-29", "2026-11-04")
 
 
-def test_no_collection_yet_is_an_error_not_a_guess(conn):
+def test_no_processed_date_yet_is_an_error_not_a_guess(conn):
     sub = subscriber(conn)
     with pytest.raises(subscriptions.SubscriptionError):
         subscriptions.next_window(conn, sub)

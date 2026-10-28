@@ -980,10 +980,25 @@ Three ways that goes wrong, and the third needs no carelessness:
 
 So `since` comes from a fact rather than an argument: the end date of that
 subscriber's last report, plus a day (`report_issues`). A gap cannot open
-however irregularly reports go out. And `until` is the last date at least 90% of
-the 363 authorities were collected on, not today, which kills the third case —
-a day that was only half collected waits for the next report rather than falling
-between the two.
+however irregularly reports go out.
+
+And `until` is the last date the pipeline has fully *processed* — not today,
+and not merely collected. `run_daily.ps1` runs ten stages: collection is the
+first, classification the ninth. A report built in between would see collection
+complete for today, find no classified venues because `classify_insertions.py`
+had not run yet, ship without them and still advance the window past the day —
+the same loss, one stage further down. `last_reportable_date()` requires all
+three of: collection reaching 90% of authorities, the diff stage having run for
+90% of them (so "no INSERT events" means none happened rather than none computed
+yet), and every non-quarantined INSERT on that date classified. A day that fails
+any of them waits for the next report instead of falling between two.
+
+**Which is why the time of day you send does not matter.** Before the daily run,
+the window ends yesterday and today lands in the next report. After it, the
+window ends today. Either way nothing is skipped and nothing is sent twice. The
+only thing that changes is how fresh the report is, not whether it is complete —
+so a run that fails and gets started by hand at four in the afternoon costs
+nothing but a day of latency.
 
 **Two tables**, created by `db.connect()` like the rest of the schema.
 `report_subscribers` is customer, territory, audience, active, start date.

@@ -21,8 +21,11 @@ end date of the last report that subscriber actually received, plus a day. A
 gap cannot open however irregularly the reports go out, because the next one
 always begins where the last one stopped.
 
-The end of a window is the last date the pipeline has *completely* collected,
-not today, which is what kills the third case.
+The end of a window is the last date the pipeline has completely *processed* --
+collected, diffed and classified -- not today, and not merely collected. That
+kills the third case, and a second version of it one stage further down: the
+daily run collects first and classifies ninth, so a report built in between
+would find today's venues missing and still move the window past them.
 """
 from __future__ import annotations
 
@@ -56,12 +59,7 @@ COMPLETENESS = 0.9
 
 def last_complete_collection_date(conn: sqlite3.Connection,
                                   threshold: float = COMPLETENESS) -> str | None:
-    """The most recent date the pipeline collected nearly all authorities on.
-
-    This is the right end for a report window. Using today instead loses any
-    venue first seen on a day whose collection has not run yet, permanently,
-    because the next window starts after today regardless.
-    """
+    """The most recent date the pipeline collected nearly all authorities on."""
     authorities = conn.execute("SELECT COUNT(*) FROM authorities").fetchone()[0]
     if not authorities:
         return None
@@ -73,6 +71,66 @@ def last_complete_collection_date(conn: sqlite3.Connection,
         (threshold * authorities,),
     ).fetchone()
     return row[0] if row else None
+
+
+def last_reportable_date(conn: sqlite3.Connection,
+                         threshold: float = COMPLETENESS) -> str | None:
+    """The most recent date whose venues are collected, diffed AND classified.
+
+    Collection alone is not enough, and that distinction is the whole point of
+    this function. run_daily.ps1 runs ten stages in sequence: collection is the
+    first and classification the ninth, with Companies House collection,
+    matching and postcode backfill in between. A report generated in that gap
+    would see collection_runs saying today is complete, find no classified
+    venues for today because classify_insertions.py has not run yet, ship a
+    report without them, and then advance the window past the day -- losing
+    those venues permanently. Exactly the failure this module exists to stop,
+    reintroduced one stage further down the pipeline.
+
+    So a date is reportable only when all three hold:
+
+      1. collection reached at least `threshold` of the authorities
+      2. the diff stage produced runs for at least `threshold` of them, so
+         "no INSERT events" means none happened rather than none computed yet
+      3. every non-quarantined INSERT event on that date has been classified
+
+    Condition 2 matters on its own: between collection and diff there are no
+    diff_events at all for the day, so condition 3 would pass trivially on a
+    day whose data has not been looked at yet.
+
+    A genuinely quiet day satisfies 2 and 3 with nothing in it, which is
+    correct -- Sundays here produce no registrations and should not hold the
+    window back.
+    """
+    authorities = conn.execute("SELECT COUNT(*) FROM authorities").fetchone()[0]
+    if not authorities:
+        return None
+    bar = threshold * authorities
+    candidates = conn.execute(
+        """SELECT collection_date FROM collection_runs
+           GROUP BY collection_date
+           HAVING SUM(status = 'ok') >= ?
+           ORDER BY collection_date DESC LIMIT 30""",
+        (bar,),
+    ).fetchall()
+    for (date,) in candidates:
+        diffed = conn.execute(
+            "SELECT COUNT(*) FROM diff_runs WHERE collection_date = ?", (date,)
+        ).fetchone()[0]
+        if diffed < bar:
+            continue
+        unclassified = conn.execute(
+            """SELECT COUNT(*) FROM diff_events de
+               WHERE de.collection_date = ? AND de.event_type = 'INSERT'
+                 AND de.quarantined = 0
+                 AND NOT EXISTS (SELECT 1 FROM classifications c
+                                 WHERE c.fhrsid = de.fhrsid
+                                   AND c.insert_collection_date = de.collection_date)""",
+            (date,),
+        ).fetchone()[0]
+        if unclassified == 0:
+            return date
+    return None
 
 
 # --- subscribers ------------------------------------------------------------
@@ -153,10 +211,11 @@ def next_window(conn, subscriber: dict, until: str | None = None) -> tuple[str, 
     first one. Ends at the last completely collected date unless overridden.
     Raises AlreadyCurrent when there is no new day to report on.
     """
-    end = until or last_complete_collection_date(conn)
+    end = until or last_reportable_date(conn)
     if end is None:
         raise SubscriptionError(
-            "no collection date is complete yet -- the pipeline has not run"
+            "no date has been collected, diffed and classified yet -- either the "
+            "pipeline has not run, or it is part way through a run"
         )
     previous = last_issue(conn, subscriber["id"])
     if previous:
