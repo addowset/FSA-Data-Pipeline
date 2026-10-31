@@ -84,6 +84,11 @@ in context. An empty week on a single-authority patch is normal arithmetic, not 
 
 ---
 
+*Corrected 28 October: the three templates said "over the last month" while every draft generated
+since 22 October has said "over the last three weeks", because the counting window is three weeks
+and "month" is not true. The decision was recorded in the test sheet's findings at the time and
+never made it back into the templates, so the doc and the sends had quietly disagreed for six days.*
+
 ## Reply email — drafted 27 October 2026
 
 The message that goes out with the report attached. Four of them, because what you send depends
@@ -243,6 +248,55 @@ the supplier wrote. No new subject, no "Re: Re:".
 
 **House style: "cut down to", never "cut to".**
 
+### Price, decided 31 October 2026
+
+**£10 a month, any size patch.** Quoted only when a supplier asks, never led with.
+
+The wording, and why each part of it is there:
+
+> If you want it every week, it's £10 a month, whatever size patch you want. It's an
+> introductory price — it'll likely be higher for people who come later — but it won't go up on
+> you automatically; if it ever changes I'd talk to you first.
+
+"Introductory" and "no automatic increase" pull against each other, because introductory normally
+promises a rise. The resolution is that it is introductory *for new customers* while *this*
+customer's price does not move without a conversation. That gives an early subscriber a reason to
+say yes now, commits Andrew to consultation rather than to a frozen price forever, and does not
+promise an increase that then has to be delivered.
+
+**The sample stays free and the covering email says so**, because the cold email promised "free,
+nothing to sign" and that promise has to be visibly kept at the moment money is first mentioned.
+Hence "That one's free, as promised" immediately before the price.
+
+**Price is not mentioned to anyone who did not ask, for the duration of the experiment.** Not
+squeamishness: the decision rules on the workbook's Results tab are keyed to reply counts and
+territory requests, and a price changes the question from "do you want this?" to "is this worth
+£10?". Those have very different yes-rates, and at sixty per category the two effects cannot be
+separated. Quoting price to everyone would leave a dead category and a mispriced one looking
+identical. Answering a direct question honestly while not leading with price is ordinary
+commercial behaviour, and nobody is told the ongoing feed is free.
+
+Revisit after the experiment, when there is a reply rate to price against.
+
+### The weekly average is the wrong statistic when the weeks swing
+
+Found three times now, each time in a live draft:
+
+- Leeds: weeks of 3, 0 and 11. The draft said "11 came up this week" and "Leeds has averaged
+  about 3 a week" two paragraphs apart. Both true, and together they read as a contradiction.
+- The East of England: weeks of 15, 5, 13 and 4. The cold email quoted "about 11 a week" and the
+  report that followed had 4 in it.
+
+A median describes a stable series and misleads on a volatile one, which is most small
+territories. Where the weeks swing, give the series instead:
+
+> the last four weeks have run 15, 5, 13 and 4 — so nine on average, but it swings about more
+> than a single number suggests
+
+Longer, and it reads as candour rather than hedging, because the alternative is quoting eleven
+and delivering four. Still to decide: whether the merge should pick between median and series
+automatically on some measure of spread, or whether every quoted figure becomes a range.
+
 ### Still to settle
 
 - The attachment filename. `export_report.py` currently writes
@@ -284,7 +338,7 @@ hotels, flagging each one as a new opening or a change of hands.
 
 Those are from this week's run. [N_new] are brand-new openings, the rest
 changes of hand; [region] has averaged about [N_week] a week over the last
-month.
+three weeks.
 
 I'm not selling anything — I just want to know if it's any use to a roaster.
 How do you hear about a new café opening at the moment: does someone drive
@@ -330,7 +384,7 @@ changes of hand. Five at random:
 • [venue] — took over from [previous name], [town] [postcode]
 
 Those are from this week's run, which has averaged about [N_week] a week over
-the last month.
+the last three weeks.
 
 I'm not selling anything — I just want to know if it's any use to a roaster.
 How does a new café opening reach you at the moment: does someone go looking,
@@ -423,7 +477,7 @@ hotels, flagging each one as a new opening or a change of hands.
 
 I'm writing with a question rather than a pitch: [region] is quiet. [N] came
 up in this week's run, and it's averaged about [N_week] a week over the last
-month. That's all of this week's:
+three weeks. That's all of this week's:
 
 • [venue], [street], [town] [postcode]
 • [venue] — took over from [previous name], [town] [postcode]

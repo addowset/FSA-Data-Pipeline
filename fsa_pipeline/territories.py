@@ -276,10 +276,28 @@ def resolve(conn: sqlite3.Connection, name: str) -> set[str]:
     if key in CITIES:
         return set(CITIES[key])
     # An exact authority name is always allowed, so anything in the database
-    # can be asked for even if the gazetteer has never heard of it.
+    # can be asked for even if the gazetteer has never heard of it. This is
+    # checked BEFORE splitting on commas and "and", because several authorities
+    # are themselves comma-and-and lists: "Bournemouth, Christchurch and Poole"
+    # is one council, not three places.
     for authority in all_authorities(conn):
         if normalise(authority) == key:
             return {authority}
+
+    # A supplier answering "how far do you cover?" rarely names one place.
+    # "Yorkshire and the north east", "Devon, Cornwall and Somerset". Split and
+    # require every part to resolve: a half-understood territory is worse than
+    # a refused one, so one unrecognised part fails the whole thing rather than
+    # quietly returning the parts that did work.
+    # Split the ORIGINAL string, not the normalised key: normalise() strips
+    # commas, so by then "Bristol, Leeds and Bradford" is one run-on word.
+    parts = [p.strip() for p in re.split(r",| and ", name) if p.strip()]
+    if len(parts) > 1:
+        out: set[str] = set()
+        for part in parts:
+            out |= resolve(conn, part)
+        return out
+
     raise UnknownTerritory(
         "don't know the territory %r -- add it to fsa_pipeline/territories.py "
         "or name a local authority exactly as the authorities table spells it" % name
@@ -287,7 +305,11 @@ def resolve(conn: sqlite3.Connection, name: str) -> set[str]:
 
 
 def resolve_many(conn: sqlite3.Connection, names: list[str]) -> set[str]:
-    """Union of several places: a supplier covering 'Devon and Cornwall'."""
+    """Union of several places given as separate strings.
+
+    resolve() already handles "Devon and Cornwall" in one string; this is for
+    when the caller has them as a list already.
+    """
     out: set[str] = set()
     for name in names:
         out |= resolve(conn, name)

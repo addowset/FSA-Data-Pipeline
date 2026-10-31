@@ -75,6 +75,36 @@ def test_empty_territory_raises(conn):
         territories.resolve(conn, "")
 
 
+def test_several_places_in_one_string(conn):
+    # What a supplier actually writes when asked how far they cover.
+    assert territories.resolve(conn, "Yorkshire and the South West") == (
+        territories.resolve(conn, "Yorkshire") | territories.resolve(conn, "South West")
+    )
+
+
+def test_comma_separated_places(conn):
+    assert territories.resolve(conn, "Bristol, Leeds and Bradford") == {
+        "Bristol", "Leeds", "Bradford",
+    }
+
+
+def test_an_authority_whose_own_name_contains_and(conn):
+    # "Bournemouth, Christchurch and Poole" is one council, not three places,
+    # so the exact-name check has to happen before any splitting.
+    conn.execute("INSERT INTO authorities VALUES (?, ?, ?)",
+                 (11, "Bournemouth, Christchurch and Poole", "South West"))
+    assert territories.resolve(conn, "Bournemouth, Christchurch and Poole") == {
+        "Bournemouth, Christchurch and Poole",
+    }
+
+
+def test_one_bad_part_fails_the_whole_territory(conn):
+    # Returning just the parts that resolved would silently under-cover the
+    # supplier, and nobody would find out until they read the report.
+    with pytest.raises(territories.UnknownTerritory):
+        territories.resolve(conn, "Yorkshire and Narnia")
+
+
 def test_resolve_many_unions(conn):
     assert territories.resolve_many(conn, ["Bristol", "Leeds"]) == {"Bristol", "Leeds"}
 
