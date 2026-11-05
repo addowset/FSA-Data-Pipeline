@@ -1,0 +1,153 @@
+DMARC baseline for opendo.co.uk, taken 5 November 2026
+=======================================================
+
+Why this file is kept. It is the evidence for moving the published policy from
+p=none to p=quarantine: 17 aggregate reports covering 28 September to 1
+November, in which every source that sent mail as opendo.co.uk was Google and
+nothing failed alignment. That is what makes enforcing safe, and without it the
+decision is only an inference from the SPF record listing Google alone.
+
+It is also the domain's pre-send baseline. 44 messages in five weeks is
+essentially no sending history, so the reports from 10 November onward -- the
+first with real traffic behind them -- are the ones worth reading, and this is
+what they should be compared against.
+
+The raw reports are not tracked. They arrive at roughly two a day once mail is
+flowing, so the folder becomes hundreds of gzipped files within a year, and
+they are recoverable from the DMARC label in the mailbox. Regenerate this
+summary from a fresh batch with:
+
+    python3 scripts/dmarc_summary.py docs/dmarc
+
+reports: 17
+coverage: 2026-09-28 to 2026-11-01
+reporters: google.com x9, Outlook.com x8
+
+policy as the reporters saw it:
+  x17  opendo.co.uk p=none sp=reject pct=100 adkim=r aspf=r
+
+messages reported: 44, from 17 distinct source(s)
+
+209.85.220.41            Google         25 msg
+     seen 28 Sep..31 Oct by google.com
+     DMARC spf={'pass': 25} dkim={'pass': 25} disposition={'none': 25}
+     header.from=['opendo.co.uk']
+     auth spf: ['opendo.co.uk=pass']
+     auth dkim: ['opendo.co.uk=pass']
+
+209.85.208.51            Google          2 msg
+     seen 14 Oct..14 Oct by Outlook.com
+     DMARC spf={'pass': 2} dkim={'pass': 2} disposition={'none': 2}
+     header.from=['opendo.co.uk']
+     auth spf: ['opendo.co.uk=pass']
+     auth dkim: ['opendo.co.uk=pass']
+
+209.85.208.54            Google          2 msg
+     seen 22 Oct..28 Oct by Outlook.com
+     DMARC spf={'pass': 2} dkim={'pass': 2} disposition={'none': 2}
+     header.from=['opendo.co.uk']
+     auth spf: ['opendo.co.uk=pass']
+     auth dkim: ['opendo.co.uk=pass']
+
+209.85.208.48            Google          2 msg
+     seen 22 Oct..28 Oct by Outlook.com
+     DMARC spf={'pass': 2} dkim={'pass': 2} disposition={'none': 2}
+     header.from=['opendo.co.uk']
+     auth spf: ['opendo.co.uk=pass']
+     auth dkim: ['opendo.co.uk=pass']
+
+74.125.228.100           Google          1 msg
+     seen 28 Sep..28 Sep by Outlook.com
+     DMARC spf={'pass': 1} dkim={'pass': 1} disposition={'none': 1}
+     header.from=['opendo.co.uk']
+     auth spf: ['opendo.co.uk=pass']
+     auth dkim: ['opendo.co.uk=pass']
+
+74.125.228.80            Google          1 msg
+     seen 29 Sep..29 Sep by Outlook.com
+     DMARC spf={'pass': 1} dkim={'pass': 1} disposition={'none': 1}
+     header.from=['opendo.co.uk']
+     auth spf: ['opendo.co.uk=pass']
+     auth dkim: ['opendo.co.uk=pass']
+
+74.125.228.96            Google          1 msg
+     seen 30 Sep..30 Sep by Outlook.com
+     DMARC spf={'pass': 1} dkim={'pass': 1} disposition={'none': 1}
+     header.from=['opendo.co.uk']
+     auth spf: ['opendo.co.uk=pass']
+     auth dkim: ['opendo.co.uk=pass']
+
+74.125.228.95            Google          1 msg
+     seen 02 Oct..02 Oct by Outlook.com
+     DMARC spf={'pass': 1} dkim={'pass': 1} disposition={'none': 1}
+     header.from=['opendo.co.uk']
+     auth spf: ['opendo.co.uk=pass']
+     auth dkim: ['opendo.co.uk=pass']
+
+209.85.208.41            Google          1 msg
+     seen 22 Oct..22 Oct by Outlook.com
+     DMARC spf={'pass': 1} dkim={'pass': 1} disposition={'none': 1}
+     header.from=['opendo.co.uk']
+     auth spf: ['opendo.co.uk=pass']
+     auth dkim: ['opendo.co.uk=pass']
+
+209.85.218.51            Google          1 msg
+     seen 22 Oct..22 Oct by Outlook.com
+     DMARC spf={'pass': 1} dkim={'pass': 1} disposition={'none': 1}
+     header.from=['opendo.co.uk']
+     auth spf: ['opendo.co.uk=pass']
+     auth dkim: ['opendo.co.uk=pass']
+
+209.85.208.50            Google          1 msg
+     seen 22 Oct..22 Oct by Outlook.com
+     DMARC spf={'pass': 1} dkim={'pass': 1} disposition={'none': 1}
+     header.from=['opendo.co.uk']
+     auth spf: ['opendo.co.uk=pass']
+     auth dkim: ['opendo.co.uk=pass']
+
+209.85.208.52            Google          1 msg
+     seen 22 Oct..22 Oct by Outlook.com
+     DMARC spf={'pass': 1} dkim={'pass': 1} disposition={'none': 1}
+     header.from=['opendo.co.uk']
+     auth spf: ['opendo.co.uk=pass']
+     auth dkim: ['opendo.co.uk=pass']
+
+209.85.208.43            Google          1 msg
+     seen 28 Oct..28 Oct by Outlook.com
+     DMARC spf={'pass': 1} dkim={'pass': 1} disposition={'none': 1}
+     header.from=['opendo.co.uk']
+     auth spf: ['opendo.co.uk=pass']
+     auth dkim: ['opendo.co.uk=pass']
+
+209.85.208.53            Google          1 msg
+     seen 31 Oct..31 Oct by Outlook.com
+     DMARC spf={'pass': 1} dkim={'pass': 1} disposition={'none': 1}
+     header.from=['opendo.co.uk']
+     auth spf: ['opendo.co.uk=pass']
+     auth dkim: ['opendo.co.uk=pass']
+
+209.85.218.42            Google          1 msg
+     seen 31 Oct..31 Oct by Outlook.com
+     DMARC spf={'pass': 1} dkim={'pass': 1} disposition={'none': 1}
+     header.from=['opendo.co.uk']
+     auth spf: ['opendo.co.uk=pass']
+     auth dkim: ['opendo.co.uk=pass']
+
+209.85.218.45            Google          1 msg
+     seen 31 Oct..31 Oct by Outlook.com
+     DMARC spf={'pass': 1} dkim={'pass': 1} disposition={'none': 1}
+     header.from=['opendo.co.uk']
+     auth spf: ['opendo.co.uk=pass']
+     auth dkim: ['opendo.co.uk=pass']
+
+209.85.218.49            Google          1 msg
+     seen 31 Oct..31 Oct by Outlook.com
+     DMARC spf={'pass': 1} dkim={'pass': 1} disposition={'none': 1}
+     header.from=['opendo.co.uk']
+     auth spf: ['opendo.co.uk=pass']
+     auth dkim: ['opendo.co.uk=pass']
+
+====================================================================
+No source outside Google in 17 reports. Nothing legitimate can
+break when p=none becomes p=quarantine.
+messages failing SPF or DKIM alignment: 0 of 44
