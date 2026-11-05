@@ -122,12 +122,36 @@ CITIES = {
 
 # Counties and sub-regions, including the abbreviations suppliers write.
 COUNTIES = {
+    # Counties abolished in the local-government reorganisations. The councils
+    # still sit together as a trade area, and locals still use the old name --
+    # Avon survives in Avon Fire and Rescue and Avon and Somerset Police long
+    # after the county went in 1996 -- so a supplier may well write it, and a
+    # Bristol firm's patch is almost always these four rather than the city
+    # council alone.
+    "avon": {"Bristol", "Bath and North East Somerset", "North Somerset",
+             "South Gloucestershire"},
+    "greater bristol": {"Bristol", "Bath and North East Somerset",
+                        "North Somerset", "South Gloucestershire"},
+    # Key has no leading "the": normalise() strips it before the lookup, so a
+    # key beginning "the " could never be reached.
+    "bristol area": {"Bristol", "Bath and North East Somerset",
+                     "North Somerset", "South Gloucestershire"},
+    "cleveland": {"Hartlepool", "Middlesbrough", "Redcar and Cleveland",
+                  "Stockton On Tees"},
+    # Humberside excludes Hull and Goole Port, which is a port health authority
+    # rather than a council, and would double-count the Hull registrations.
+    "humberside": {"Hull City", "East Riding of Yorkshire",
+                   "North East Lincolnshire", "North Lincolnshire"},
+    # Tyneside is the four Tyne boroughs. Sunderland is Wearside; ask for
+    # "Tyne and Wear" for all five.
+    "tyneside": {"Gateshead", "Newcastle Upon Tyne", "North Tyneside",
+                 "South Tyneside"},
     # Southern Scotland means the two border councils and no more. Ayrshire and
     # Lanarkshire are sometimes swept in, but a territory that over-reaches
     # makes a promise the report cannot keep, so this under-covers on purpose.
     "southern scotland": {"Dumfries and Galloway", "Scottish Borders"},
     "south scotland": {"Dumfries and Galloway", "Scottish Borders"},
-    "the scottish borders": {"Dumfries and Galloway", "Scottish Borders"},
+    "scottish borders": {"Dumfries and Galloway", "Scottish Borders"},
     "bedfordshire": {"Bedford", "Central Bedfordshire", "Luton"},
     "berkshire": {"Reading", "Bracknell Forest", "Slough", "West Berkshire",
                   "Windsor and Maidenhead", "Wokingham"},

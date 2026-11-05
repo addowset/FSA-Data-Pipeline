@@ -175,3 +175,96 @@ def test_southern_scotland_is_the_two_border_councils():
     # territory that over-reaches promises venues the report cannot deliver.
     assert territories.resolve(conn, "southern Scotland") == {
         "Dumfries and Galloway", "Scottish Borders"}
+
+@pytest.fixture
+def abolished_conn():
+    """Authorities for the abolished counties, plus the names that nearly match
+    them. Solihull contains "hull", Newcastle-under-Lyme is in Staffordshire not
+    on the Tyne, and Hull and Goole Port is a port health authority rather than
+    a council, so a substring search for any of these picks up the wrong rows."""
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE authorities (code INTEGER, name TEXT, region_name TEXT)")
+    conn.executemany("INSERT INTO authorities VALUES (?, ?, ?)", [
+        (1, "Bristol", "South West"),
+        (2, "Bath and North East Somerset", "South West"),
+        (3, "North Somerset", "South West"),
+        (4, "South Gloucestershire", "South West"),
+        (5, "Hull City", "Yorkshire and Humberside"),
+        (6, "East Riding of Yorkshire", "Yorkshire and Humberside"),
+        (7, "North East Lincolnshire", "Yorkshire and Humberside"),
+        (8, "North Lincolnshire", "Yorkshire and Humberside"),
+        (9, "Hull and Goole Port", "Yorkshire and Humberside"),
+        (10, "Solihull", "West Midlands"),
+        (11, "Newcastle Upon Tyne", "North East"),
+        (12, "Gateshead", "North East"),
+        (13, "North Tyneside", "North East"),
+        (14, "South Tyneside", "North East"),
+        (15, "Sunderland", "North East"),
+        (16, "Newcastle-Under-Lyme", "West Midlands"),
+    ])
+    return conn
+
+
+def test_avon_is_the_four_former_avon_councils(abolished_conn):
+    """Avon was scrapped in 1996, so a Bristol supplier's trade area has no
+    current county name. These four are still the area."""
+    assert territories.resolve(abolished_conn, "Avon") == {
+        "Bristol", "Bath and North East Somerset", "North Somerset",
+        "South Gloucestershire"}
+
+
+def test_the_bristol_area_matches_avon(abolished_conn):
+    assert territories.resolve(abolished_conn, "the Bristol area") == \
+           territories.resolve(abolished_conn, "Avon")
+    assert territories.resolve(abolished_conn, "greater Bristol") == \
+           territories.resolve(abolished_conn, "avon")
+
+
+def test_bristol_alone_is_still_just_bristol(abolished_conn):
+    """A supplier who writes "Bristol" means Bristol. Widening it silently
+    would put venues in a report the email never promised."""
+    assert territories.resolve(abolished_conn, "Bristol") == {"Bristol"}
+
+
+def test_humberside_excludes_the_port_health_authority(abolished_conn):
+    """Hull and Goole Port is a port health authority, not a council, and would
+    double-count the Hull registrations."""
+    got = territories.resolve(abolished_conn, "Humberside")
+    assert "Hull and Goole Port" not in got
+    assert "Solihull" not in got
+    assert got == {"Hull City", "East Riding of Yorkshire",
+                   "North East Lincolnshire", "North Lincolnshire"}
+
+
+def test_tyneside_is_the_four_tyne_boroughs(abolished_conn):
+    """Sunderland is Wearside. Newcastle-under-Lyme is in Staffordshire."""
+    got = territories.resolve(abolished_conn, "Tyneside")
+    assert got == {"Newcastle Upon Tyne", "Gateshead", "North Tyneside",
+                   "South Tyneside"}
+    assert "Sunderland" not in got
+    assert "Newcastle-Under-Lyme" not in got
+
+
+def test_an_abolished_county_combines_with_a_region(abolished_conn):
+    """"Avon and the North East" has to union, not pick one."""
+    got = territories.resolve(abolished_conn, "Avon and the North East")
+    assert "Bristol" in got and "Sunderland" in got
+
+def test_every_gazetteer_key_is_reachable():
+    """resolve() normalises before looking up, so a key that is not already in
+    normalised form can never match. Two were added in one afternoon -- "the
+    bristol area" and "the scottish borders" -- both silently dead, because a
+    lookup that misses falls through to UnknownTerritory and looks exactly like
+    a name nobody has added yet."""
+    unreachable = []
+    for name, mapping in (("CITIES", territories.CITIES),
+                          ("COUNTIES", territories.COUNTIES),
+                          ("REGION_SYNONYMS", territories.REGION_SYNONYMS),
+                          ("REGION_GROUPS", territories.REGION_GROUPS),
+                          ("ABBREVIATIONS", territories.ABBREVIATIONS),
+                          ("NATIONAL", {key: None for key in territories.NATIONAL})):
+        for key in mapping:
+            if territories.normalise(key) != key:
+                unreachable.append("%s[%r] would need to be %r"
+                                   % (name, key, territories.normalise(key)))
+    assert not unreachable, "unreachable gazetteer keys: " + "; ".join(unreachable)
