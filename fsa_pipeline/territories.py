@@ -52,6 +52,14 @@ REGION_SYNONYMS = {
     "east anglia": "East Counties",
 }
 
+# Some names a supplier writes span several of the FSA's regions. "The
+# Midlands" is not a region in the authorities table; it is East Midlands plus
+# West Midlands, and a broker who writes it means both. Kept separate from
+# REGION_SYNONYMS because that maps one name to exactly one region, and
+# widening it to sets would make every lookup there pay for the rare case.
+REGION_GROUPS = {
+    "midlands": {"East Midlands", "West Midlands"},
+}
 # Cities and towns. The value is the set of authorities a supplier naming that
 # place would expect to see, which is not always one: "Aberdeen" to a wholesaler
 # means the city and the shire around it.
@@ -114,6 +122,12 @@ CITIES = {
 
 # Counties and sub-regions, including the abbreviations suppliers write.
 COUNTIES = {
+    # Southern Scotland means the two border councils and no more. Ayrshire and
+    # Lanarkshire are sometimes swept in, but a territory that over-reaches
+    # makes a promise the report cannot keep, so this under-covers on purpose.
+    "southern scotland": {"Dumfries and Galloway", "Scottish Borders"},
+    "south scotland": {"Dumfries and Galloway", "Scottish Borders"},
+    "the scottish borders": {"Dumfries and Galloway", "Scottish Borders"},
     "bedfordshire": {"Bedford", "Central Bedfordshire", "Luton"},
     "berkshire": {"Reading", "Bracknell Forest", "Slough", "West Berkshire",
                   "Windsor and Maidenhead", "Wokingham"},
@@ -271,6 +285,18 @@ def resolve(conn: sqlite3.Connection, name: str) -> set[str]:
                 "region %r is not present in the authorities table" % region
             )
         return set(by_region[region])
+    if key in REGION_GROUPS:
+        by_region = regions(conn)
+        missing = sorted(REGION_GROUPS[key] - set(by_region))
+        if missing:
+            raise UnknownTerritory(
+                "region(s) %s are not present in the authorities table"
+                % ", ".join(repr(name) for name in missing)
+            )
+        out: set[str] = set()
+        for region in REGION_GROUPS[key]:
+            out |= set(by_region[region])
+        return out
     if key in COUNTIES:
         return set(COUNTIES[key])
     if key in CITIES:

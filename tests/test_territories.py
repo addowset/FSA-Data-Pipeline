@@ -115,3 +115,63 @@ def test_validate_reports_names_missing_from_the_table(conn):
     # than passing silently.
     missing = territories.validate(conn)
     assert "Barnsley" in missing
+
+@pytest.fixture
+def midlands_conn():
+    """A fixture with both Midlands regions, which the main one lacks."""
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE authorities (code INTEGER, name TEXT, region_name TEXT)")
+    conn.executemany("INSERT INTO authorities VALUES (?, ?, ?)", [
+        (1, "Birmingham", "West Midlands"),
+        (2, "Coventry", "West Midlands"),
+        (3, "Derby", "East Midlands"),
+        (4, "Amber Valley", "East Midlands"),
+        (5, "Manchester", "North West"),
+    ])
+    return conn
+
+
+def test_the_midlands_spans_both_midlands_regions(midlands_conn):
+    """"The Midlands" is not a region in the table; it is two of them."""
+    assert territories.resolve(midlands_conn, "the Midlands") == {
+        "Birmingham", "Coventry", "Derby", "Amber Valley"}
+
+
+def test_midlands_group_ignores_the_leading_the(midlands_conn):
+    assert territories.resolve(midlands_conn, "midlands") == \
+           territories.resolve(midlands_conn, "The Midlands")
+
+
+def test_a_group_combines_with_another_place(midlands_conn):
+    """A supplier writing two patches gets the union, not one of them."""
+    assert territories.resolve(midlands_conn, "the North West and the Midlands") == {
+        "Manchester", "Birmingham", "Coventry", "Derby", "Amber Valley"}
+
+
+def test_a_group_absorbs_a_part_it_already_contains(midlands_conn):
+    """Derbyshire sits inside the East Midlands, so the union is just the group."""
+    assert territories.resolve(midlands_conn, "Derby and the Midlands") == \
+           territories.resolve(midlands_conn, "the Midlands")
+
+
+def test_a_group_whose_regions_are_absent_raises(conn):
+    """The main fixture has no Midlands rows at all, so this must not return
+    an empty set -- a territory that silently resolves to nothing would build
+    an empty report and nobody would find out until the customer read it."""
+    with pytest.raises(territories.UnknownTerritory):
+        territories.resolve(conn, "the Midlands")
+
+
+def test_southern_scotland_is_the_two_border_councils():
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE authorities (code INTEGER, name TEXT, region_name TEXT)")
+    conn.executemany("INSERT INTO authorities VALUES (?, ?, ?)", [
+        (1, "Dumfries and Galloway", "Scotland"),
+        (2, "Scottish Borders", "Scotland"),
+        (3, "South Ayrshire", "Scotland"),
+        (4, "Edinburgh (City of)", "Scotland"),
+    ])
+    # Ayrshire is sometimes swept in; this deliberately under-covers, because a
+    # territory that over-reaches promises venues the report cannot deliver.
+    assert territories.resolve(conn, "southern Scotland") == {
+        "Dumfries and Galloway", "Scottish Borders"}

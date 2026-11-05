@@ -337,8 +337,7 @@ hotels, flagging each one as a new opening or a change of hands.
 • [venue] — took over from [previous name], [town] [postcode]
 
 Those are from this week's run. [N_new] are brand-new openings, the rest
-changes of hand; [region] has averaged about [N_week] a week over the last
-three weeks.
+changes of hand; [region] has produced [N_month] over the last four weeks.
 
 I'm not selling anything — I just want to know if it's any use to a roaster.
 How do you hear about a new café opening at the moment: does someone drive
@@ -383,8 +382,8 @@ changes of hand. Five at random:
 • [venue], [street], [town] [postcode]
 • [venue] — took over from [previous name], [town] [postcode]
 
-Those are from this week's run, which has averaged about [N_week] a week over
-the last three weeks.
+Those are from this week's run. The UK has produced [N_month] over the last
+four weeks.
 
 I'm not selling anything — I just want to know if it's any use to a roaster.
 How does a new café opening reach you at the moment: does someone go looking,
@@ -466,7 +465,7 @@ patch may be mis-stated on their own website:*
 *"That's probably not enough to be worth your time. If there were more of them, would this be
 useful to you? And is Newcastle actually your patch, or do you deliver further than that?"*
 
-> **Subject:** [N] new food & drink venues in [region] [this week / in three weeks] — any use?
+> **Subject:** [N] new food & drink venues in [region] [this week / in four weeks] — any use?
 
 ```
 Hi [Name],
@@ -476,15 +475,15 @@ I've created a report that reads every new food-business registration across
 hotels, flagging each one as a new opening or a change of hands.
 
 I'm writing with a question rather than a pitch: [region] is quiet. [N] came
-up in this week's run, and it's averaged about [N_week] a week over the last
-three weeks. That's all of this week's:
+up in this week's run, and [N_month] over the last four weeks. That's all of
+this week's:
 
 • [venue], [street], [town] [postcode]
 • [venue] — took over from [previous name], [town] [postcode]
 
 That's probably not enough to be worth your time. If there were more of them,
-would this be useful to you? [widen_to] runs at about [widen_per_week] a week
-— do you [deliver / cover] that far?
+would this be useful to you? [widen_to] produced [widen_month] over the same
+four weeks — do you [deliver / cover] that far?
 
 Reply and I'll send this week's report over, cut down to whatever your patch
 actually is. Free, nothing to sign.
@@ -496,31 +495,22 @@ Reply 'no thanks' and I won't contact you again.
 
 ### The widening offer, per supplier
 
-The `widen_to` and `widen_per_week` columns in the leads workbook hold these. Read the right-hand column before you send: **widening does not always help.**
+The `widen_to` and `widen_four_weeks` columns in the leads workbook hold these, and this table is generated from them by `exports/_scratch/_widen_figures.py` rather than kept by hand. Read the right-hand column before you send: **widening does not always help.**
 
-| Supplier | Patch | Per week now | Widen to | Per week then |
+Regenerated 5 November 2026, and it needed to be. The previous version was built during the postcode-area analysis — its Patch column read "CA LA", "BS", "S" — so both the patches and the per-week figures came from the measurement that was later abandoned for being wrong about how a supplier's territory maps to councils. It also still listed the Coversure branches, Westinsure and McCabe's, all since marked do not send. A table carrying the instruction "read the right-hand column before you send" is the worst place for a stale number, because it is read at the moment of sending.
+
+Eight sendable rows now have a widening offer, and over four weeks every one of them gains: the smallest jump is CSW's 14 to 27, the largest Carvetii's 1 to 54. The old table's "no gain" rows — Ouseburn and Pumphreys — have `nothing wider available` on file instead, which is the same judgement recorded where the merge will actually see it.
+
+| Supplier | Patch | Four weeks now | Widen to | Four weeks then |
 |---|---|---|---|---|
-| Carvetii Coffee | CA LA | 0 | the North West | 9 |
-| Smith Street Coffee Roasters | S | 0.5 | Yorkshire | 7 |
-| Coversure Sheffield | S | 0.5 | Yorkshire | 10 |
-| Coversure Bristol | BS | 0.5 | the South West | 8 |
-| Coversure Southampton | SO | 0 | Hampshire and Dorset | 6 |
-| ETM Recycling | BS | 1 | the South West | 10 |
-| Birnbeck Insurance | BA BS TA | 1 | the South West | 8 |
-| Hot Numbers Coffee | CB PE | 1.5 | East Anglia | 7 |
-| Silver Oak Coffee | CB PE | 1.5 | East Anglia | 7 |
-| Coversure Leicester | LE | 2.5 | the East Midlands | 7 |
-| Coversure Nottingham | NG | 2 | the East Midlands | 7 |
-| Westinsure Plymouth | EX PL TA | 2.5 | the South West | 8 |
-| CSW Insurance Brokers | DG DH NE TD | 2 | the North East and southern Scotland | 6 |
-| Coversure Cramlington | NE TD | 2 | the North East and Borders | 4 |
-| Wrexham Bean Co | CH LL SY | 2.5 | North Wales and Cheshire | 3 |
-| Windrush Insurance Brokers | OX | 1 | Oxfordshire and the Thames Valley | 3 |
-| Ouseburn Coffee Co | NE | 1 | the North East | **1 — no gain** |
-| Pumphreys Coffee | NE SR | 1 | the North East | **1 — no gain** |
-| Lucid Coffee Roasters | BT | 2.5 | — | **nothing wider exists** |
-| McCabe's Coffee | BT | 2.5 | — | **nothing wider exists** |
-| Ristretto Coffee Roasters | BT | 2.5 | — | **nothing wider exists** |
+| CSW Insurance Brokers | Dumfriesshire and Northumbria | 14 | the North East and southern Scotland | 27 |
+| Hot Numbers Coffee | Cambridgeshire | 7 | the East of England | 36 |
+| Silver Oak Coffee | Cambridgeshire | 7 | the East of England | 36 |
+| Birnbeck Insurance | Somerset | 5 | the South West | 39 |
+| ETM Recycling | Bristol | 4 | the South West | 52 |
+| Carvetii Coffee | Cumbria | 1 | the North West | 54 |
+| McClarrons | North Yorkshire and Hull | 12 | Yorkshire and the Humber | 66 |
+| R K Henshall | Cheshire | 8 | the North West | 77 |
 
 Five of the 21 have nowhere useful to go. For the two Newcastle roasters the whole North East runs at 1–2 a week for the roaster venue set, and it is violently lumpy: 2, 11, 1, 1 across the four usable weeks. For the three Northern Ireland roasters, BT *is* the whole country — one postcode area covering 1.9m people, and there is no wider UK region to widen into.
 
@@ -532,7 +522,9 @@ For those five, cut the widening paragraph entirely and let the email be what it
 
 **`[Name]`** — only 14 of 95 roasters publish a named contact (8 national, 6 regional). For the other 81, the line is `Hi,` on its own. Not "Hi there", which reads like software; not "Hi Sir/Madam"; and never a blank that leaves `Hi ,`.
 
-**`[N]`, `[N_new]`, `[N_week]`** — computed per recipient, never hard-coded. If a region produced three, say three and list three. The honesty is the product.
+**`[N]`, `[N_new]`, `[N_month]`, `[widen_month]`** — computed per recipient, never hard-coded, and read from the workbook's `venues_this_week`, `venues_four_weeks` and `widen_four_weeks` columns rather than retyped. If a region produced three, say three and list three. The honesty is the product.
+
+`[N_month]` replaced a weekly average on 5 November 2026. The average was unsound: we hold 76 days of history, one working week of which (21–25 September) recorded no inserts anywhere in the country, and three single days — 30 September, 6 and 20 October — hold about a quarter of every record ever collected, at 3,400–4,300 each against a typical weekday of 423. Underneath that, 26% of councils release 80% or more of a month's venues on one day, and the median council puts 58% of its month into its biggest day. Across 35 authorities those cycles cancel out; across five they do not, which is why Leeds read 3, 0, 11 and the East of England 15, 5, 13, 4. The statistic was not the problem — the window was shorter than the data's own publication rhythm. Four weeks is longer than that rhythm, so it always contains the cycle, and it is a count the attachment proves rather than an estimate. Nine sendable rows stood at nought for the week when this was changed; none stood at nought over four weeks.
 
 **Venue lines** — up to five. Lead with new openings, finish with one takeover so the "changed hands" claim is evidenced rather than asserted. If there are no takeovers that fortnight, drop that line rather than reaching back further.
 
