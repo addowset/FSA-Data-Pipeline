@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import re
 import sys
 from pathlib import Path
 
@@ -139,7 +140,8 @@ def main(argv=None):
     rows = sorted((build_report_row(record) for record in kept), key=sort_key)
 
     customer = args.customer or (subscriber["customer_name"] if subscriber else None)
-    output = Path(args.output) if args.output else default_output(territory, until)
+    output = Path(args.output) if args.output else default_output(
+        customer or territory, until)
     output.parent.mkdir(parents=True, exist_ok=True)
     stamp = write_report(
         output, rows,
@@ -178,10 +180,24 @@ def main(argv=None):
     return 0
 
 
-def default_output(territory: str, until: str) -> Path:
-    slug = "".join(c if c.isalnum() else "-" for c in territory.lower()).strip("-")
-    slug = "-".join(part for part in slug.split("-") if part)
-    return Path("exports/reports") / ("new-venues_%s_%s.xlsx" % (slug, until))
+MAX_LABEL = 38
+
+
+def default_output(label: str, until: str) -> Path:
+    """Name the file for the person who will open it.
+
+    This name lands in a customer's inbox, so it is their name, or their
+    patch, and the week it covers. Slugging the territory does not survive
+    contact with a real answer: a roaster who says "Manchester down to
+    Birmingham" resolves to five counties, and the old scheme produced a
+    ninety-three character filename that some mail clients truncate and no
+    human can read.
+    """
+    clean = re.sub(r"[^\w &'-]", " ", label)
+    clean = re.sub(r"\s+", " ", clean).strip()
+    if len(clean) > MAX_LABEL:
+        clean = clean[:MAX_LABEL].rsplit(" ", 1)[0].rstrip(" ,-")
+    return Path("exports/reports") / ("Opendo new venues - %s - w-e %s.xlsx" % (clean, until))
 
 
 def parse_args(argv=None):
