@@ -896,9 +896,29 @@ of local authorities, reading the twelve regions from the `authorities` table so
 they cannot drift from the database. An unknown name is an error, not a guess --
 a report quietly built on a half-understood territory is worse than one that was
 never sent, because nobody finds out until the customer reads it. Add new names
-to the `CITIES` or `COUNTIES` dicts; `territories.validate()` checks every name
-in them still exists in the table, which matters because councils reorganise
-(Cumbria became Cumberland and Westmorland and Furness in 2023).
+to `CITIES` (a place), `COUNTIES` (a set of authorities, including the abolished
+counties -- Avon, Cleveland, Humberside, Tyneside, whose councils still form a
+trade area and whose names people still use) or `REGION_GROUPS` (a name that
+spans several of the FSA's twelve regions, such as "the Midlands", which is
+East Midlands plus West Midlands). `territories.validate()` checks every
+authority named in `CITIES` and `COUNTIES` still exists in the table, which
+matters because councils reorganise (Cumbria became Cumberland and Westmorland
+and Furness in 2023); a `REGION_GROUPS` entry naming an absent region raises
+`UnknownTerritory` at resolve time rather than quietly returning an empty set.
+
+**Write the key in normalised form.** `resolve()` calls `normalise()` before
+looking anything up, so a key with a leading "the", a comma, or doubled
+whitespace can never match -- and a miss is indistinguishable from a name
+nobody has added, because both raise `UnknownTerritory`. Two dead keys were
+added in one afternoon that way ("the bristol area", "the scottish borders").
+`test_every_gazetteer_key_is_reachable` now checks the whole gazetteer.
+
+A multi-part answer resolves to the union: "Bristol, Leeds and Bradford", or
+"the North West and the Midlands". Every part must resolve or the whole thing
+fails, for the same reason an unknown single name does. An exact authority
+name is matched before any splitting, because several councils are themselves
+comma-and-and lists -- "Bournemouth, Christchurch and Poole" is one council,
+not three places.
 
 Authorities and not postcode areas, because postcode areas cross county lines
 freely: CB reaches into Essex, PE deep into Lincolnshire, S across Derbyshire
@@ -1025,6 +1045,42 @@ you can sell to" is a different message to the customer from "nothing happened",
 and the covering email has to lead with whichever it is. See
 `docs/email-variants-category1-roasters.md`.
 
+## Running the send gate
+
+Before drafting any outreach for a send day, check that day's rows against the
+live data:
+
+    python scripts/send_gate.py                      # today's batch
+    python scripts/send_gate.py --date 2026-11-10
+    python scripts/send_gate.py --all                # every batched day
+
+It writes nothing and sends nothing. It reads the `send_batch` column of
+`docs/leads_all_three_categories.xlsx`, resolves each row's `region_label`
+through `territories.py`, counts the venues that row's audience could sell to,
+and prints a verdict per supplier.
+
+This exists because the emails quote a figure and attach the list that proves
+it, so the figure has to be true on the morning of the send rather than on the
+morning the workbook was last rebuilt. Three days of drift once made six
+reports obsolete before they were sent. The gate also catches a stale
+`region_label`: it prints a warning when the workbook's stored four-week count
+disagrees with the live one, and fails with a non-zero exit if a `region_label`
+no longer resolves at all, which is what happens when a supplier's patch is
+edited to a name the gazetteer has never heard of.
+
+**The rule it applies.** A row with nothing over four weeks is sent on its wider
+region if `widen_to` holds one, and held to the next send day if not. Never sent
+empty. The list is non-renewable -- one first contact per company, and no way to
+buy another -- so an email with nothing in it does not merely fail, it spends the
+only approach there is.
+
+It judges on the four-week total rather than the week, because the week is
+decided as much by a council's publication timetable as by trade. See
+**Publication cadence** under Design notes. When the rule was written nine
+sendable rows stood at nought for the week and not one stood at nought over
+four weeks, so in practice the widen-or-hold branch fires rarely; a row at
+nought for the week is normally just told to quote its four-week figure.
+
 ## Rebuilding the database
 
 The database is derived, rebuildable state; the raw archive is the actual
@@ -1143,12 +1199,25 @@ pytest
 
 ```
 fsa_pipeline/        shared library code (config, HTTP client, FHRS + Companies House
-                        parsing, archive writer, db, monitoring, canaries, csv_export)
-scripts/              entry-point scripts: collect_fhrs_bulk.py, parse_fhrs_bulk.py,
+                        parsing, archive writer, db, monitoring, canaries, csv_export,
+                        logging_utils). Customer-report side: territories.py (place name
+                        -> authorities), report_filter.py (which venues a given audience
+                        can sell to), report_xlsx.py (the two-tab customer workbook),
+                        subscriptions.py (who gets a weekly, and which week is next)
+scripts/              entry-point scripts.
+                      Daily pipeline: collect_fhrs_bulk.py, parse_fhrs_bulk.py,
                         diff_fhrs.py, collect_companies_house.py, parse_companies_house.py,
                         lookup_operator_companies.py, match_companies_house.py,
                         backfill_postcodes.py, classify_insertions.py, monitor_pipeline.py,
-                        export_csv.py, export_venue_feed.py, rebuild_db.py, run_daily.ps1 (scheduled task entry point)
+                        export_csv.py, export_venue_feed.py, rebuild_db.py,
+                        run_daily.ps1 (scheduled task entry point)
+                      Checks and maintenance: check_daily_run.py, run_check.ps1,
+                        reevaluate_quarantines.py, check_officer_churn.py,
+                        send_run_status_email.py, export_audit_data.py
+                      Customer-facing: export_report.py (one territory, one week, as a
+                        workbook), subscribers.py (manage the weekly list),
+                        send_gate.py (check a send day's rows before drafting),
+                        dmarc_summary.py (aggregate DMARC reports for the sending domain)
 raw/                  raw archive, gitignored — this is the asset, back it up separately
   fhrs/<date>/        one dated directory per collection run
     _authorities-index.xml.gz   that day's local-authority list, as returned by the API
@@ -1177,6 +1246,11 @@ docs/                 hand-made and tracked, unlike everything in exports/. Thes
   leads_all_three_categories.xlsx   the supplier list and its send/reply tracking
   email-variants-category1-roasters.md   outreach and reply copy, with the reasoning
   lead-list-build-summary.md        how the list was researched
+  dmarc-baseline-<date>.txt         DMARC evidence for the sending domain's policy,
+                                      rebuilt by scripts/dmarc_summary.py
+  dmarc/                            raw DMARC reports, gitignored: about two arrive a
+                                      day once mail is flowing, and they are recoverable
+                                      from the mailbox. The summary above is the record
 config.toml           non-secret configuration (URLs, timeouts, contact email)
 fsa_pipeline.db        SQLite database, gitignored (this is derived state -- rebuildable
                         from raw/ by reparsing, unlike raw/ itself)
@@ -2028,6 +2102,62 @@ and confirms the lookup still finds it.
   Buckinghamshire stays quarantined. The supplier-coverage workbook
   from the other chat needs regenerating from a fresh export to pick
   these up; its "red = territory includes B or M" rows will change.
+
+### Publication cadence, and what the re-upload guard does not tell you
+
+The flagging described above answers "is this 400-insert day a data artefact?".
+It does not answer "is this authority's weekly figure meaningful?", and the two
+are easy to conflate because both are about lumpy inserts.
+
+Measured over the 76 days to 5 November 2026, across the 350 authorities with
+any inserts in the preceding 28 days:
+
+- **26%** (90 of 350) delivered 80% or more of a month's new venues on a single
+  day.
+- The **median** authority put **58%** of its month into its biggest single day.
+- A typical weekday brings about **423** inserts nationally. Three days brought
+  3,400 to 4,300 each -- 30 September (4,288), 6 October (3,620) and 20 October
+  (3,441) -- so **more than a third** of every record ever collected, 11,349 of
+  31,590, arrived on three days.
+- Weekends are routinely zero: councils publish on weekdays.
+- There was one genuine stall: **21-25 September**, five consecutive weekdays
+  with no inserts anywhere in the country, while collection ran normally and
+  reported 363 of 363 authorities ok every day. The backlog released on 30
+  September. Any statistic computed over a window containing either the stall
+  or its catch-up is wrong in one direction or the other, which is why the
+  weekly median and range in the leads workbook are computed from 1 October
+  onwards.
+
+**Why the guard does not surface this.** The re-upload guard trips on
+`insert_count > 150` absolute, or on three times a trailing 28-day median when
+that median is above zero. Seven runs have ever exceeded 150, against **821**
+runs in the 10-150 band. And the ratio test is deliberately disabled when the
+trailing median is zero -- see the 2026-09-11 note in `_check_reupload_guard`,
+where 189 of 190 historical quarantines turned out to be that degenerate case.
+That decision was right: a council batching 46 registrations after weeks of
+none is normal behaviour, not an artefact. But it means the guard is silent for
+precisely the authorities that batch, because publishing nothing most days is
+what makes their median zero. The flag is a data-integrity signal, not a volume
+signal, and `batch_publication = Yes` on an export row says "this lump is real
+registrations" rather than "this authority is lumpy".
+
+**What follows for anything customer-facing.** Across 35 authorities the batch
+cycles average out; across one or five they do not. Bristol is the sharpest
+case: 4,673 establishments on the register, 184 inserts in 76 days arriving in
+lumps, and 2 venues a roaster could sell to in four weeks. A weekly figure for a
+territory that size is decided by which side of a publication day the week falls
+on. Leeds for the roaster venue set, the six weeks to 5 November, ran 2, 5, 3,
+0, 11, 5: a median of 4 describes none of those weeks, and the customer who got
+the 0 and the customer who got the 11 were sent the same promise.
+
+So figures quoted to customers are a **four-week count**, not a weekly average.
+Four weeks is longer than the publication rhythm, so it always contains the
+cycle; it is a count the attachment can prove rather than an estimate; and it
+does not need a judgement about whether to use a median or a mean on a series
+that is zero-inflated rather than noisy-around-a-mean. The leads workbook holds
+these as `venues_four_weeks` and `widen_four_weeks`, and the outreach copy takes
+`[N_month]` and `[widen_month]` from them. `scripts/send_gate.py` applies the
+same window.
 
 ## Data licensing
 
