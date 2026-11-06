@@ -31,3 +31,8 @@ tools/venue_feed.html
 
 # Artifacts of the remote-device FUSE mount, not project files.
 .fuse_hidden*
+
+# LibreOffice's lock file, present only while a document in the repo is open.
+# docs/leads_all_three_categories.xlsx is edited by hand, so this appears
+# whenever that workbook is open and vanishes when it is closed.
+.~lock.*#
