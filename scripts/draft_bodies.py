@@ -14,6 +14,13 @@ Every figure is computed rather than retyped. The recipient is offered the
 actual spreadsheet, so an inflated count is the one error they are guaranteed
 to catch, and the honesty is the product.
 
+NO LINK IN THE BODY, deliberately. A bare domain in the signature comes out
+of Gmail as the full "https://www.google.com/url?q=...&source=gmail" redirect
+as visible text, and an explicit HTML anchor still has its href rewritten the
+same way while the plain-text alternative loses the line entirely. Tested 10
+November 2026; see docs/email-variants-category1-roasters.md. The sending
+address carries the domain, so nothing is lost.
+
 VENUE ORDER follows the merge rules in docs/email-variants-category1-roasters.md:
 new openings first, one takeover last, so the "changes of hand" claim is
 evidenced rather than asserted. Within each group the picks round-robin across
@@ -142,7 +149,6 @@ TEMPLATE = """{greeting}
 
 Andrew Dowsett
 Opendo, 54 Beverley Road, Bristol BS7 0JN
-opendo.co.uk
 Reply 'no thanks' and I won't contact you again."""
 
 
