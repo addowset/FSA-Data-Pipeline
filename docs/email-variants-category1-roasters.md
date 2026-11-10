@@ -581,7 +581,9 @@ Which means the original position in the paragraph above was right, for a reason
 
 **The deliverable is an attachment, and it goes in the reply, not the cold email.** So the opening email carries no attachment, no link and no tracking pixel — which is about as clean as a cold send from a young domain can be. The report itself arrives in your reply, inside a thread the recipient started, which both Google and Microsoft treat far more leniently than an unsolicited first contact. Send it as `.xlsx`: `.csv` is sometimes stripped or flagged by corporate filters, and `.zip` very often is.
 
-**A bare "yes" gets the national file.** The call to action promises the whole country by default, so have that file ready on the morning you send rather than generating it per reply. Only the recipients who volunteer a postcode need a cut-down version.
+**A bare "yes" gets the national file.** The call to action promises the whole country by default. Only the recipients who volunteer a postcode need a cut-down version.
+
+This used to say "have that file ready on the morning you send rather than generating it per reply", which was wrong on both counts and is withdrawn, 10 November 2026. A full national run takes **3.3 seconds** — measured, 249 venues across 363 authorities — which is invisible inside the time it takes to read a reply and write one. And pre-building is actively worse: "this week's report" means the week current when they reply, so a file built on the send day is pinned to that week and a yes arriving two days later either gets rebuilt anyway or gets something labelled "this week" that is not. The original concern was not latency but running the machinery for the first time with somebody waiting; the end-to-end test on 31 October generated and sent real national reports, so that risk is retired. Build it when the yes arrives.
 
 ---
 
