@@ -122,6 +122,7 @@ find on the ground, tell me and I'll look at it.
 
 Andrew Dowsett
 Opendo, 54 Beverley Road, Bristol BS7 0JN
+opendo.co.uk
 ```
 
 Delivery, then the offer, then housekeeping. It closes on "tell me and I'll look at it" rather
@@ -191,6 +192,7 @@ rather say so here than have you open it wondering what went wrong.
 
 Andrew Dowsett
 Opendo, 54 Beverley Road, Bristol BS7 0JN
+opendo.co.uk
 ```
 
 Two versions of the middle paragraph, and the difference matters to the reader:
@@ -349,6 +351,7 @@ Free, nothing to sign.
 
 Andrew Dowsett
 Opendo, 54 Beverley Road, Bristol BS7 0JN
+opendo.co.uk
 Reply 'no thanks' and I won't contact you again.
 ```
 
@@ -395,6 +398,7 @@ by territory however your patches are drawn. Free, nothing to sign.
 
 Andrew Dowsett
 Opendo, 54 Beverley Road, Bristol BS7 0JN
+opendo.co.uk
 Reply 'no thanks' and I won't contact you again.
 ```
 
@@ -490,6 +494,7 @@ actually is. Free, nothing to sign.
 
 Andrew Dowsett
 Opendo, 54 Beverley Road, Bristol BS7 0JN
+opendo.co.uk
 Reply 'no thanks' and I won't contact you again.
 ```
 
@@ -573,7 +578,9 @@ Sendable split: **A 97, B 60, C 21.** Note how small B has become. Under the old
 
 **PECR** — the postal address and the opt-out line are both required on every message, so neither is optional in any variant. The address is 54 Beverley Road, Bristol BS7 0JN.
 
-**The deliverable is an attachment, and it goes in the reply, not the cold email.** So the opening email carries no attachment, no link and no tracking pixel — which is about as clean as a cold send from a young domain can be. The report itself arrives in your reply, inside a thread the recipient started, which both Google and Microsoft treat far more leniently than an unsolicited first contact. Send it as `.xlsx`: `.csv` is sometimes stripped or flagged by corporate filters, and `.zip` very often is.
+**The website goes in the signature too, from 10 November 2026.** This extends the sign-off rule above rather than adding to it: the link had been left to the Workspace footer, the footer entry was then removed on the understanding that the body already carried it, and the body never had — so the first five cold emails were built with no reference to the site anywhere. Reading the 28 October tests back out of a recipient's quoted reply shows the delivered message ended at the postal address, with neither a link nor an opt-out line. That is the footer problem exactly as described above: what was reviewed was not what sent, and nobody could see the difference. A bare `opendo.co.uk` with no scheme reads as a reference rather than a call to action, which keeps the single ask as the reply.
+
+**The deliverable is an attachment, and it goes in the reply, not the cold email.** So the opening email carries no attachment and no tracking pixel, and its only link is the bare `opendo.co.uk` in the signature — which is about as clean as a cold send from a young domain can be. One link to the sending domain itself is the safest kind there is: no shortener, no redirect, nothing to follow, and the same domain the From address already shows, now aligned on SPF, DKIM and DMARC. What harms a young domain is several competing links, or a link whose domain does not match the sender. The report itself arrives in your reply, inside a thread the recipient started, which both Google and Microsoft treat far more leniently than an unsolicited first contact. Send it as `.xlsx`: `.csv` is sometimes stripped or flagged by corporate filters, and `.zip` very often is.
 
 **A bare "yes" gets the national file.** The call to action promises the whole country by default, so have that file ready on the morning you send rather than generating it per reply. Only the recipients who volunteer a postcode need a cut-down version.
 
