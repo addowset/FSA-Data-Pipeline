@@ -581,6 +581,16 @@ Which means the original position in the paragraph above was right, for a reason
 
 **The deliverable is an attachment, and it goes in the reply, not the cold email.** So the opening email carries no attachment, no link and no tracking pixel — which is about as clean as a cold send from a young domain can be. The report itself arrives in your reply, inside a thread the recipient started, which both Google and Microsoft treat far more leniently than an unsolicited first contact. Send it as `.xlsx`: `.csv` is sometimes stripped or flagged by corporate filters, and `.zip` very often is.
 
+**The file is attached by hand, and the draft says so until it is.** Tested properly on 10 November 2026. The reply body is drafted here; the attachment is not, because it cannot be. Attaching by file reference — handing the mail tool a path and a hash — fails from this kind of session: a path under `outputs/` is refused outright, and a path under `uploads/` is worse, because the draft is created successfully with the attachment silently missing. A body reading "Attached: all 249 new venues…" with nothing attached is one click from being sent, and that is exactly what happened in the test.
+
+So every reply draft that needs a file begins with a marker line:
+
+    [ATTACH: exports/reports/Opendo new venues - UK - w-e 2026-11-10.xlsx]
+
+Attach the file, delete the marker, send. The marker is the safeguard rather than a reminder: it has to be removed before the message reads properly, so deleting it is the act of having attached the file. A draft that still carries one has not been attached to.
+
+The alternative is pushing the file through the conversation as base64, which was not tested, because it should not be used even if it works. A 49KB workbook is about 66KB of base64, the file grows every week as more of the country is covered, and the cost would be paid again on every single reply. Attaching it by hand is five seconds and has the better property anyway: you see the file you are about to send.
+
 **A bare "yes" gets the national file.** The call to action promises the whole country by default. Only the recipients who volunteer a postcode need a cut-down version.
 
 This used to say "have that file ready on the morning you send rather than generating it per reply", which was wrong on both counts and is withdrawn, 10 November 2026. A full national run takes **3.3 seconds** — measured, 249 venues across 363 authorities — which is invisible inside the time it takes to read a reply and write one. And pre-building is actively worse: "this week's report" means the week current when they reply, so a file built on the send day is pinned to that week and a yes arriving two days later either gets rebuilt anyway or gets something labelled "this week" that is not. The original concern was not latency but running the machinery for the first time with somebody waiting; the end-to-end test on 31 October generated and sent real national reports, so that risk is retired. Build it when the yes arrives.
