@@ -165,20 +165,44 @@ def main():
 
     foreign = [(ip, e) for ip, e in rows if classify(ip) == 'NOT GOOGLE']
     print('=' * 68)
+
+    # What the receivers read from DNS, which is better evidence that a policy
+    # change has propagated than asking a resolver: this is what the servers
+    # actually applied.
+    enforcing = sorted({line.split('p=')[1].split()[0] for line in policies
+                        if 'p=' in line})
+    print('policy the reporters applied: %s' % ', '.join(enforcing))
+
     if foreign:
         print('SOURCES OUTSIDE GOOGLE: %d' % len(foreign))
         for ip, e in foreign:
             print('  %-24s %d msg, dkim=%s spf=%s'
                   % (ip, e['count'], dict(e['dkim']), dict(e['spf'])))
-        print('Check each before enforcing: a legitimate one needs adding to SPF')
-        print('or DKIM first, or p=quarantine will start sending it to spam.')
+        print('Check each one. A legitimate sender needs adding to SPF or DKIM;')
+        print('under an enforcing policy its mail is already being acted on.')
     else:
-        print('No source outside Google in %d reports. Nothing legitimate can'
+        print('No source outside Google in %d reports, so nothing legitimate is'
               % len(files))
-        print('break when p=none becomes p=quarantine.')
+        print('being caught by the published policy.')
+
     hard = sum(e['count'] for _ip, e in rows
                if e['dkim'].get('fail') or e['spf'].get('fail'))
     print('messages failing SPF or DKIM alignment: %d of %d' % (hard, total))
+
+    # disposition is what the receiver DID, not the policy it holds. A passing
+    # message is never acted on, so disposition=none under p=quarantine means
+    # the policy was not reached -- not that the policy is none. Anything
+    # actually quarantined or rejected shows up here.
+    acted = {}
+    for _ip, e in rows:
+        for verdict, n in e['disposition'].items():
+            if verdict and verdict != 'none':
+                acted[verdict] = acted.get(verdict, 0) + n
+    if acted:
+        print('messages the receiver acted on: %s'
+              % ', '.join('%s %d' % kv for kv in sorted(acted.items())))
+    else:
+        print('no message was quarantined or rejected by any receiver')
 
 
 if __name__ == '__main__':
