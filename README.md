@@ -1081,6 +1081,52 @@ sendable rows stood at nought for the week and not one stood at nought over
 four weeks, so in practice the widen-or-hold branch fires rarely; a row at
 nought for the week is normally just told to quote its four-week figure.
 
+## Building the draft bodies
+
+Once the gate says a row should go, write the words:
+
+    python scripts/draft_bodies.py                      # today's batch
+    python scripts/draft_bodies.py --date 2026-11-11
+    python scripts/draft_bodies.py --date 2026-11-11 --summary-only
+
+One `.txt` per supplier under `exports/drafts/<send date>/`, plus a summary
+table. It sends nothing and touches no mailbox: the files are what gets pasted
+into a draft. Run `scripts/send_gate.py` first -- that decides whether a row
+should go at all, this decides what it says.
+
+Every figure is computed rather than retyped, which is the whole point of the
+script existing. The recipient is offered the actual spreadsheet, so an
+inflated count is the one error they are guaranteed to catch.
+
+**Venue order** follows the merge rules in
+`docs/email-variants-category1-roasters.md`: new openings first, one takeover
+last, so "the rest changes of hand" is evidenced rather than asserted. Within
+each group the picks round-robin across councils, because for a regional
+supplier the list is also showing the patch is covered -- five venues from five
+councils reads as a region, five from one town reads as all there is. The
+script warns when a list ends up from a single council anyway, which happens
+when that is genuinely all the week produced.
+
+**Address formatting** is most of the file, because FSA address lines have no
+fixed meaning by position. The town is sometimes the last line (Darlington,
+LONDON), sometimes the second-to-last with a county after it (Sidcup then
+Kent), sometimes the council name sits last (Brighouse then Calderdale), and
+sometimes the whole address including the postcode is crammed into line 1.
+Taking the last line as the town gives "31 Commercial Street, Calderdale HD6
+1AF" -- a council presented as a town -- and a fixed position is wrong about as
+often. Dropping every line that names the council fails differently: for a
+unitary authority the council IS the town, so removing "Darlington" promotes
+the road to town. What separates them is whether the candidate looks like a
+street, which is cheap to test. So counties are dropped outright, the town is
+the last line that does not look like a street, a line naming the council is
+used only when nothing better remains, and a non-street line sitting ahead of a
+street is a premises name rather than a town. Case is corrected throughout:
+the register holds plenty of LONDON and FOLKESTONE, and a shouted town in a
+cold email reads as a mail merge.
+
+The script also warns about a venue with no postcode, a venue whose town could
+not be resolved, and a list with no takeover in it.
+
 ## Rebuilding the database
 
 The database is derived, rebuildable state; the raw archive is the actual
@@ -1217,6 +1263,7 @@ scripts/              entry-point scripts.
                       Customer-facing: export_report.py (one territory, one week, as a
                         workbook), subscribers.py (manage the weekly list),
                         send_gate.py (check a send day's rows before drafting),
+                        draft_bodies.py (write that day's email bodies from the data),
                         dmarc_summary.py (aggregate DMARC reports for the sending domain)
 raw/                  raw archive, gitignored — this is the asset, back it up separately
   fhrs/<date>/        one dated directory per collection run

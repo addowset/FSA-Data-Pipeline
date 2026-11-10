@@ -518,6 +518,35 @@ For those five, cut the widening paragraph entirely and let the email be what it
 
 ---
 
+## Per-category wording
+
+*Approved 10 November 2026, on the first send day. Until then this document was
+written for roasters only -- the trade noun, the venue types and the "how does
+it reach you" question all name a roaster -- while the same three variants go to
+brokers and to cleaning and waste. The verb was already settled against Variant
+C (deliver for roasters, cover for the other two); these are the rest, and they
+live in `VOICE` in `scripts/draft_bodies.py` so the merge cannot drift from
+this table.*
+
+| | Roasters | Brokers | Cleaning & waste |
+|---|---|---|---|
+| **Trade noun** | a roaster | a broker | a waste contractor |
+| **Venue types** | the cafés, restaurants, bars and hotels | the cafés, restaurants, bars, hotels and takeaways | the cafés, restaurants, bars, hotels, takeaways and food shops |
+| **Verb** | deliver | cover | cover |
+
+**The question**, which is the line the email exists to ask:
+
+- **Roasters** — "How do you hear about a new café opening at the moment: does someone drive round looking, or does it come to you?"
+- **Brokers** — "How does a new venue reach you at the moment: does it come through an introducer, or do you go looking?"
+- **Cleaning & waste** — "How do you hear about a new site opening at the moment: does someone go looking, or does it come to you?"
+
+The venue types are not cosmetic: they have to match the audience set in
+`report_filter.AUDIENCES`, or the email promises a venue mix the attachment
+does not contain. A roaster's list excludes takeaways; a waste contractor's
+includes them along with shops and mobile caterers. "Site" rather than "venue"
+for waste, and "reach you" rather than "hear about" for brokers, because a
+broker's new business arrives through an introducer rather than being spotted.
+
 ## Merge rules
 
 **`[Name]`** — only 14 of 95 roasters publish a named contact (8 national, 6 regional). For the other 81, the line is `Hi,` on its own. Not "Hi there", which reads like software; not "Hi Sir/Madam"; and never a blank that leaves `Hi ,`.
@@ -528,7 +557,7 @@ For those five, cut the widening paragraph entirely and let the email be what it
 
 **Venue lines** — up to five. Lead with new openings, finish with one takeover so the "changed hands" claim is evidenced rather than asserted. If there are no takeovers that fortnight, drop that line rather than reaching back further.
 
-**`[region]`** — from the `region` column. Where it names a city and a country ("Aberdeen / Scotland", "Glasgow / Scotland"), use the country: the wider figure is both more accurate to what you'd send them and a stronger number.
+**`[region]`** — from the `region_label` column, not `region`. `region` is the raw research note ("Aberdeen / Scotland", "North West / national"); `region_label` is the cleaned, resolvable form the email actually says ("the North West"), and it is what `send_gate.py` and `draft_bodies.py` both read. Where the raw note names a city and a country, the label uses the country: the wider figure is both more accurate to what you'd send them and a stronger number. If the two disagree, `region` is the authority on what the supplier's patch is and the label should be widened to match — five labels had quietly dropped part of a patch when this was last checked on 5 November 2026.
 
 **Which variant each supplier gets** — the `email_variant` column in the leads workbook, assigned from the coverage report rather than by eye:
 
