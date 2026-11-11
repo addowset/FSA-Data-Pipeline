@@ -88,6 +88,9 @@ VOICE = {
         venues='the cafés, restaurants, bars and hotels',
         question=('How do you hear about a new café opening at the moment: '
                   'does someone drive round looking, or does it come to you?'),
+        question_national=('How does a new caf\u00e9 opening reach you at the '
+                           'moment: does someone go looking, or does it come '
+                           'in on its own?'),
         verb='deliver'),
     'Hospitality insurance brokers': dict(
         audience='broker',
@@ -95,6 +98,9 @@ VOICE = {
         venues='the cafés, restaurants, bars, hotels and takeaways',
         question=('How does a new venue reach you at the moment: does it come '
                   'through an introducer, or do you go looking?'),
+        question_national=('How does a new venue reach you at the moment: does '
+                           'it come through an introducer, or do you go '
+                           'looking?'),
         verb='cover'),
     'Commercial cleaning & waste contractors': dict(
         audience='waste',
@@ -102,6 +108,9 @@ VOICE = {
         venues='the cafés, restaurants, bars, hotels, takeaways and food shops',
         question=('How do you hear about a new site opening at the moment: does '
                   'someone go looking, or does it come to you?'),
+        question_national=('How does a new site opening reach you at the '
+                           'moment: does someone go looking, or does it come '
+                           'in on its own?'),
         verb='cover'),
 }
 
@@ -121,6 +130,18 @@ COUNTIES = {
     'warwickshire', 'west midlands', 'west sussex', 'west yorkshire',
     'wiltshire', 'worcestershire', 'scotland', 'wales', 'england',
     'united kingdom', 'uk',
+    # Northern Ireland's six counties. None is a council name, and all appear
+    # as the last address line in NI records.
+    'antrim', 'armagh', 'down', 'co down', 'county down', 'fermanagh',
+    'londonderry', 'derry', 'tyrone', 'northern ireland',
+    # Historic counties still written on addresses but not council names.
+    'ayrshire', 'banffshire', 'berwickshire', 'caithness', 'dumfriesshire',
+    'dunbartonshire', 'inverness-shire', 'kincardineshire',
+    'kirkcudbrightshire', 'lanarkshire', 'morayshire', 'peeblesshire',
+    'perthshire', 'renfrewshire', 'ross-shire', 'roxburghshire',
+    'selkirkshire', 'stirlingshire', 'sutherland', 'wigtownshire',
+    'clwyd', 'dyfed', 'gwent', 'glamorgan', 'mid glamorgan',
+    'south glamorgan', 'west glamorgan',
 }
 
 # A line that looks like a street is not the town. Covers the two shapes that
@@ -133,7 +154,13 @@ STREET_WORDS = (
     'precinct', 'retail', 'industrial', 'business',
 )
 
-TEMPLATE = """{greeting}
+SIGNOFF = """Andrew Dowsett
+Opendo, 54 Beverley Road, Bristol BS7 0JN
+Reply 'no thanks' and I won't contact you again."""
+
+# A -- regional. The recipient named a patch that produces enough, so the
+# number is about their patch and the question is how they hear of one now.
+TEMPLATE_A = """{greeting}
 
 {opening}
 
@@ -147,9 +174,43 @@ TEMPLATE = """{greeting}
 
 {cta}
 
-Andrew Dowsett
-Opendo, 54 Beverley Road, Bristol BS7 0JN
-Reply 'no thanks' and I won't contact you again."""
+""" + SIGNOFF
+
+# B -- national. "[region]" means nothing to a supplier who ships everywhere,
+# so the count leads and the call to action sells sortability instead: they
+# split the list between reps, which is what the spreadsheet is for.
+TEMPLATE_B = """{greeting}
+
+{opening}
+
+{provenance_lead}
+
+{venue_lines}
+
+{provenance}
+
+{pitch}
+
+{cta}
+
+""" + SIGNOFF
+
+# C -- thin patch with no national fallback. There is no volume to sell, so the
+# email IS the question: is the patch mis-stated, and would a wider one help?
+# No "I'm not selling anything" paragraph, because the question is the pitch.
+TEMPLATE_C = """{greeting}
+
+{opening}
+
+{premise}
+
+{venue_lines}
+
+{pivot}
+
+{cta}
+
+""" + SIGNOFF
 
 
 def wrap(text):
@@ -207,10 +268,14 @@ def address_parts(record):
         low = line.lower().strip(' ,')
         if fold(line) == fold(name):   # a line repeating the trading name
             continue
-        if low in COUNTIES:            # never the town when anything else exists
-            continue
+        # The council is checked before COUNTIES, because several councils are
+        # named after a county -- Fife, Angus, Midlothian, Powys -- and for a
+        # unitary authority that name is also the town. Dropping it as a county
+        # would throw away the only line that can supply one.
         if low in (authority, authority_bare):
             council_line = authority_display or tidy_name(line)
+            continue
+        if low in COUNTIES:            # never the town when anything else exists
             continue
         lines.append(tidy_name(line))
 
@@ -276,8 +341,35 @@ def order_venues(records, want=5):
     return (takeovers or new)[:want]
 
 
+class CannotDraft(Exception):
+    """Raised rather than inventing copy the document does not specify."""
+
+
+def lead_in(count):
+    """The document gives "[Five of them / All of them]", which has no form for
+    one venue."""
+    if count == 1:
+        return 'Here it is'
+    return 'All of them' if count <= 5 else 'Five of them'
+
+
+def split_sentence(new_count, total):
+    """"[N] are brand-new openings, the rest changes of hand" breaks at the
+    ends: at nought it reads "0 are brand-new openings, the rest", and with
+    everything new there is no rest. Same facts, grammatical."""
+    if total == 1:
+        return ('a brand-new opening' if new_count
+                else 'a change of hands rather than a new opening')
+    if new_count == 0:
+        return 'all changes of hand rather than new openings'
+    if new_count == total:
+        return 'all brand-new openings'
+    return '%d are brand-new openings, the rest changes of hand' % new_count
+
+
 def build(row, index, pools, conn):
     voice = VOICE[row[index['category']]]
+    variant = row[index['email_variant']]
     label = row[index['region_label']]
     authorities = territories.resolve(conn, label)
     week, _ = filter_records(pools['week'], audience=voice['audience'],
@@ -285,34 +377,100 @@ def build(row, index, pools, conn):
     four, _ = filter_records(pools['four'], audience=voice['audience'],
                              authorities=authorities)
     new = [r for r in week if r['classification'] == 'NEW_VENUE']
+    changed = [r for r in week if r['classification'] == 'OPERATOR_CHANGE']
     picked = order_venues(week, 5)
+    opening = wrap(
+        "I've created a report that reads every new food-business "
+        'registration across 363 UK local authorities and picks out %s, '
+        'flagging each one as a new opening or a change of hands.'
+        % voice['venues'])
+    lines = '\n'.join('%s %s' % (BULLET, venue_line(r)) for r in picked)
+    greeting = row[index['greeting']]
 
-    subject = '%d new food & drink venues in %s this week %s any use?' % (
-        len(week), label, DASH)
-    body = TEMPLATE.format(
-        greeting=row[index['greeting']],
-        opening=wrap(
-            "I've created a report that reads every new food-business "
-            'registration across 363 UK local authorities and picks out %s, '
-            'flagging each one as a new opening or a change of hands.'
-            % voice['venues']),
-        n=len(week),
-        region=label,
-        lead_in='All of them' if len(week) <= 5 else 'Five of them',
-        venue_lines='\n'.join('%s %s' % (BULLET, venue_line(r)) for r in picked),
-        provenance=wrap(
-            "Those are from this week's run. %d are brand-new openings, the "
-            'rest changes of hand; %s has produced %d over the last four weeks.'
-            % (len(new), label, len(four))),
-        pitch=wrap("I'm not selling anything %s I just want to know if it's "
-                   'any use to %s. %s'
-                   % (DASH, voice['trade'], voice['question'])),
-        cta=wrap("Reply and I'll send this week's report over %s for the whole "
-                 'country, or tell me your postcode and how far you %s and '
-                 "I'll cut it down to your patch. Free, nothing to sign."
-                 % (DASH, voice['verb'])))
+    if variant == 'A':
+        subject = '%d new food & drink venues in %s this week %s any use?' % (
+            len(week), label, DASH)
+        body = TEMPLATE_A.format(
+            greeting=greeting,
+            opening=opening,
+            n=len(week),
+            region=label,
+            lead_in=lead_in(len(week)),
+            venue_lines=lines,
+            provenance=wrap(
+                "Those are from this week's run, %s; %s has produced %d over "
+                'the last four weeks.'
+                % (split_sentence(len(new), len(week)), label, len(four))),
+            pitch=wrap("I'm not selling anything %s I just want to know if "
+                       "it's any use to %s. %s"
+                       % (DASH, voice['trade'], voice['question'])),
+            cta=wrap("Reply and I'll send this week's report over %s for the "
+                     'whole country, or tell me your postcode and how far you '
+                     "%s and I'll cut it down to your patch. Free, nothing to "
+                     'sign.' % (DASH, voice['verb'])))
+
+    elif variant == 'B':
+        subject = ('%d new food & drink venues across the UK last week %s any use?'
+                   % (len(week), DASH))
+        body = TEMPLATE_B.format(
+            greeting=greeting,
+            opening=opening,
+            provenance_lead=wrap(
+                '%d came up across the UK last week %s %d brand-new openings '
+                'and %d changes of hand. %s:'
+                % (len(week), DASH, len(new), len(changed),
+                   lead_in(len(week)))),
+            venue_lines=lines,
+            provenance=wrap("Those are from this week's run. The UK has "
+                            'produced %d over the last four weeks.' % len(four)),
+            pitch=wrap("I'm not selling anything %s I just want to know if "
+                       "it's any use to %s. %s"
+                       % (DASH, voice['trade'], voice['question_national'])),
+            cta=wrap("Reply and I'll send this week's report over. It's a "
+                     'spreadsheet %s name, full address, postcode, and whether '
+                     "it's a new opening or a takeover %s so it sorts by "
+                     'territory however your patches are drawn. Free, nothing '
+                     'to sign.' % (DASH, DASH)))
+
+    elif variant == 'C':
+        widen_to = row[index['widen_to']]
+        widen_month = row[index['widen_four_weeks']]
+        if not week:
+            # The copy says "that's all of this week's" and then lists them.
+            # With nothing to list there is no sentence, and the document does
+            # not say what replaces it. Refuse rather than invent.
+            raise CannotDraft(
+                "no venues this week, and Variant C's list is introduced by "
+                "\"that's all of this week's\" -- needs a wording decision")
+        if not widen_to or widen_to == 'nothing wider available':
+            raise CannotDraft(
+                'nothing to widen to, and the pivot asks "do you cover that '
+                'far?" about somewhere -- needs a wording decision')
+        subject = '%d new food & drink venues in %s this week %s any use?' % (
+            len(week), label, DASH)
+        body = TEMPLATE_C.format(
+            greeting=greeting,
+            opening=opening,
+            premise=wrap(
+                "I'm writing with a question rather than a pitch: %s is quiet. "
+                "%d came up in this week's run, and %d over the last four "
+                "weeks. That's all of this week's:"
+                % (label, len(week), len(four))),
+            venue_lines=lines,
+            pivot=wrap(
+                "That's probably not enough to be worth your time. If there "
+                'were more of them, would this be useful to you? %s produced '
+                '%d over the same four weeks %s do you %s that far?'
+                % (widen_to, widen_month, DASH, voice['verb'])),
+            cta=wrap("Reply and I'll send this week's report over, cut down to "
+                     'whatever your patch actually is. Free, nothing to sign.'))
+
+    else:
+        raise CannotDraft('unknown email_variant %r' % variant)
+
     return dict(subject=subject, body=body, week=week, four=four, new=new,
-                picked=picked, label=label, authorities=authorities)
+                picked=picked, label=label, authorities=authorities,
+                variant=variant)
 
 
 def main(argv=None):
