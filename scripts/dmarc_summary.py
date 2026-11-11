@@ -77,6 +77,9 @@ def main():
     policies = collections.Counter()
     windows = []
     failures = []
+    # Per-message tallies. A source can hold a mix of records, so these cannot
+    # be recovered from the per-source counters afterwards.
+    tally = collections.Counter()
 
     for path in files:
         try:
@@ -123,6 +126,21 @@ def main():
                 b = int(begin)
                 entry['first'] = b if entry['first'] is None else min(entry['first'], b)
                 entry['last'] = b if entry['last'] is None else max(entry['last'], b)
+
+            spf_ok = text(record, 'row/policy_evaluated/spf') == 'pass'
+            dkim_ok = text(record, 'row/policy_evaluated/dkim') == 'pass'
+            tally['messages'] += n
+            if spf_ok or dkim_ok:
+                tally['dmarc_pass'] += n
+            else:
+                tally['dmarc_fail'] += n
+            if not spf_ok and dkim_ok:
+                # SPF cannot survive a forward; DKIM can. This is what a
+                # forwarded or auto-replied message looks like, and DMARC
+                # passed on the DKIM signature alone.
+                tally['spf_only'] += n
+            if spf_ok and not dkim_ok:
+                tally['dkim_only'] += n
 
     if failures:
         print('\nUNREADABLE:')
@@ -185,9 +203,21 @@ def main():
               % len(files))
         print('being caught by the published policy.')
 
-    hard = sum(e['count'] for _ip, e in rows
-               if e['dkim'].get('fail') or e['spf'].get('fail'))
-    print('messages failing SPF or DKIM alignment: %d of %d' % (hard, total))
+    print('DMARC passed on %d of %d message(s); failed on %d'
+          % (tally['dmarc_pass'], tally['messages'], tally['dmarc_fail']))
+    if tally['spf_only']:
+        print('  %d passed on DKIM with SPF failing, which is what a forwarded or'
+              % tally['spf_only'])
+        print('  auto-replied message looks like: SPF cannot survive a forward,')
+        print('  DKIM can, and DMARC needs only one of the two to pass.')
+    if tally['dkim_only']:
+        print('  %d passed on SPF with DKIM failing, which is worth a look: the'
+              % tally['dkim_only'])
+        print('  signature should survive anything that preserves the body.')
+    if tally['dmarc_fail']:
+        print('  %d failed BOTH mechanisms, so the published policy applied to'
+              % tally['dmarc_fail'])
+        print('  them. Check the sources above before loosening anything.')
 
     # disposition is what the receiver DID, not the policy it holds. A passing
     # message is never acted on, so disposition=none under p=quarantine means
