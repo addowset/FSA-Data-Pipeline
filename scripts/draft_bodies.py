@@ -328,21 +328,57 @@ def _round_robin_by_council(records):
 
 
 def order_venues(records, want=5):
-    """New openings first, one takeover last, spread across councils within
-    each group. A takeover last evidences the "changes of hand" claim; without
-    one the line would be asserted and nothing in the list would show it."""
+    """New openings first, a takeover last, spread across councils within each
+    group. The takeover evidences the "changes of hand" claim; without one the
+    line is asserted and nothing in the list shows it.
+
+    The list has to be filled to `want` whenever that many venues exist, because
+    the copy above it says either "Five of them" or "All of them" and both are
+    then false. Reserving the final slot is not the same as capping the rest at
+    want - 1: with two new openings and two takeovers, all four belong in the
+    list, three of them ahead of the last.
+    """
     new = _round_robin_by_council(
         [r for r in records if r['classification'] == 'NEW_VENUE'])
     takeovers = _round_robin_by_council(
         [r for r in records if r['classification'] == 'OPERATOR_CHANGE'
          and r['previous_business_name']])
-    if takeovers and new:
-        return new[:want - 1] + takeovers[:1]
-    return (takeovers or new)[:want]
+    # A change of hands whose predecessor the council did not record cannot
+    # carry a "took over from" line, but it is still a venue and still belongs
+    # in the list rather than being dropped.
+    accounted = {id(r) for r in new} | {id(r) for r in takeovers}
+    rest = _round_robin_by_council([r for r in records if id(r) not in accounted])
+
+    if not takeovers:
+        return (new + rest)[:want]
+    head = (new + rest)[:want - 1]
+    return head + takeovers[:want - len(head)]
 
 
 class CannotDraft(Exception):
     """Raised rather than inventing copy the document does not specify."""
+
+
+SUBJECT_MAX = 78
+
+
+def subject_for(count, region):
+    """The subject's job is to ask the question, so the question has to survive
+    truncation.
+
+    Mail clients show roughly 60 to 78 characters, and less on a phone. A
+    supplier with a wide patch pushes the subject past that -- "Gloucestershire,
+    Bristol, Somerset and Oxfordshire" gives 101 -- and what falls off the end
+    is "any use?", which is the only part that asks anything. Past the limit the
+    question moves to the front and the patch becomes what gets cut instead.
+    Nothing is dropped and nothing is reworded; the order changes so that
+    truncation costs the least important part.
+    """
+    standard = '%d new food & drink venues in %s this week %s any use?' % (
+        count, region, DASH)
+    if len(standard) <= SUBJECT_MAX:
+        return standard
+    return 'Any use? %d new food & drink venues in %s this week' % (count, region)
 
 
 def lead_in(count):
@@ -354,17 +390,23 @@ def lead_in(count):
 
 
 def split_sentence(new_count, total):
-    """"[N] are brand-new openings, the rest changes of hand" breaks at the
-    ends: at nought it reads "0 are brand-new openings, the rest", and with
-    everything new there is no rest. Same facts, grammatical."""
+    """The clause after "Those are from this week's run", carrying its own
+    separator.
+
+    The document's wording is "run. [N] are brand-new openings, the rest changes
+    of hand" -- a full stop, because what follows is a sentence. It breaks at
+    both ends: at nought it reads "0 are brand-new openings, the rest", and with
+    everything new there is no rest. The replacements are descriptions rather
+    than sentences, so they take a comma instead. Same facts either way.
+    """
     if total == 1:
-        return ('a brand-new opening' if new_count
-                else 'a change of hands rather than a new opening')
+        return (', a brand-new opening' if new_count
+                else ', a change of hands rather than a new opening')
     if new_count == 0:
-        return 'all changes of hand rather than new openings'
+        return ', all changes of hand rather than new openings'
     if new_count == total:
-        return 'all brand-new openings'
-    return '%d are brand-new openings, the rest changes of hand' % new_count
+        return ', all brand-new openings'
+    return '. %d are brand-new openings, the rest changes of hand' % new_count
 
 
 def build(row, index, pools, conn):
@@ -388,8 +430,7 @@ def build(row, index, pools, conn):
     greeting = row[index['greeting']]
 
     if variant == 'A':
-        subject = '%d new food & drink venues in %s this week %s any use?' % (
-            len(week), label, DASH)
+        subject = subject_for(len(week), label)
         body = TEMPLATE_A.format(
             greeting=greeting,
             opening=opening,
@@ -398,7 +439,7 @@ def build(row, index, pools, conn):
             lead_in=lead_in(len(week)),
             venue_lines=lines,
             provenance=wrap(
-                "Those are from this week's run, %s; %s has produced %d over "
+                "Those are from this week's run%s; %s has produced %d over "
                 'the last four weeks.'
                 % (split_sentence(len(new), len(week)), label, len(four))),
             pitch=wrap("I'm not selling anything %s I just want to know if "
@@ -446,8 +487,7 @@ def build(row, index, pools, conn):
             raise CannotDraft(
                 'nothing to widen to, and the pivot asks "do you cover that '
                 'far?" about somewhere -- needs a wording decision')
-        subject = '%d new food & drink venues in %s this week %s any use?' % (
-            len(week), label, DASH)
+        subject = subject_for(len(week), label)
         body = TEMPLATE_C.format(
             greeting=greeting,
             opening=opening,

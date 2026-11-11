@@ -374,7 +374,7 @@ I've created a report that reads every new food-business registration across
 hotels, flagging each one as a new opening or a change of hands.
 
 [N] came up across the UK last week — [N_new] brand-new openings and [N_old]
-changes of hand. Five at random:
+changes of hand. Five of them:
 
 • [venue], [street], [town] [postcode]
 • [venue], [street], [town] [postcode]
@@ -556,6 +556,8 @@ broker's new business arrives through an introducer rather than being spotted.
 `[N_month]` replaced a weekly average on 5 November 2026. The average was unsound: we hold 76 days of history, one working week of which (21–25 September) recorded no inserts anywhere in the country, and three single days — 30 September, 6 and 20 October — hold about a quarter of every record ever collected, at 3,400–4,300 each against a typical weekday of 423. Underneath that, 26% of councils release 80% or more of a month's venues on one day, and the median council puts 58% of its month into its biggest day. Across 35 authorities those cycles cancel out; across five they do not, which is why Leeds read 3, 0, 11 and the East of England 15, 5, 13, 4. The statistic was not the problem — the window was shorter than the data's own publication rhythm. Four weeks is longer than that rhythm, so it always contains the cycle, and it is a count the attachment proves rather than an estimate. Nine sendable rows stood at nought for the week when this was changed; none stood at nought over four weeks.
 
 **Venue lines** — up to five. Lead with new openings, finish with one takeover so the "changed hands" claim is evidenced rather than asserted. If there are no takeovers that fortnight, drop that line rather than reaching back further.
+
+Variant B said "Five at random" until 11 November 2026 and now says "Five of them", matching A. The pick is not random and should not claim to be: it is spread one per council and ordered by the rule above, which makes a better list than a random five would, but "at random" was a small untruth in a product whose pitch is that the numbers are honest. The known cost of keeping the pick deterministic is that every national row in a day gets the same five venues — five went out identical on 11 November — so if two national recipients ever compare notes it reads as a bulk send. Seeding the pick per recipient would fix that and make "at random" true again; it was considered and not taken.
 
 **`[region]`** — from the `region_label` column, not `region`. `region` is the raw research note ("Aberdeen / Scotland", "North West / national"); `region_label` is the cleaned, resolvable form the email actually says ("the North West"), and it is what `send_gate.py` and `draft_bodies.py` both read. Where the raw note names a city and a country, the label uses the country: the wider figure is both more accurate to what you'd send them and a stronger number. If the two disagree, `region` is the authority on what the supplier's patch is and the label should be widened to match — five labels had quietly dropped part of a patch when this was last checked on 5 November 2026.
 
