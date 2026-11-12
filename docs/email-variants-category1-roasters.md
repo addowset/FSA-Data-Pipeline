@@ -493,6 +493,46 @@ Opendo, 54 Beverley Road, Bristol BS7 0JN
 Reply 'no thanks' and I won't contact you again.
 ```
 
+### When the patch is quieter than the copy assumes
+
+*Decided 11 November 2026. The body above says "[N] came up in this week's run… That's all of
+this week's:" and then lists them, which has no form when the week produced nothing. On the day
+this was settled five of the nine C rows stood at nought for the week, and two at nought for the
+month. `scripts/draft_bodies.py` picks the form from the live counts; it used to refuse both.*
+
+**Quiet week, something in the month.** The list becomes the month's venues, up to five, so the
+email keeps its evidence, and the subject takes the "in four weeks" form:
+
+```
+I'm writing with a question rather than a pitch: [region] is quiet. Nothing
+came up in this week's run, and [N_month] over the last four weeks. [Five of
+them / All of them / Here it is]:
+```
+
+The pivot and everything after it are unchanged.
+
+**Nothing in the month either.** There is nothing of theirs to count or list, so the email says
+so plainly and leads with the wider region, whose venues are the evidence. The subject names the
+wider region — "[widen_month] new food & drink venues in [widen_to] in four weeks — any use?" —
+because there is no honest number for the patch:
+
+```
+I'm writing with a question rather than a pitch: [region] is quiet. Nothing
+has come up there in the last four weeks. [widen_to] produced [widen_month]
+over the same four weeks. Five of them:
+
+• [venue], [street], [town] [postcode]
+
+If that's within reach, would this be useful to you — do you [deliver / cover]
+that far?
+```
+
+**Every C row now has somewhere to widen to.** Lucid (Belfast) and Ouseburn (Newcastle) carried
+"nothing wider available", a verdict from the postcode-area analysis in which BT already was all
+of Northern Ireland and NE most of the North East. Counted by council each is a single authority:
+Belfast produced 2 over four weeks against Northern Ireland's 8, Newcastle 0 against the North
+East's 17. Both targets were set on 11 November.
+
 ### The widening offer, per supplier
 
 The `widen_to` and `widen_four_weeks` columns in the leads workbook hold these, and this table is generated from them by `exports/_scratch/_widen_figures.py` rather than kept by hand. Read the right-hand column before you send: **widening does not always help.**

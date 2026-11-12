@@ -362,7 +362,7 @@ class CannotDraft(Exception):
 SUBJECT_MAX = 78
 
 
-def subject_for(count, region):
+def subject_for(count, region, period='this week'):
     """The subject's job is to ask the question, so the question has to survive
     truncation.
 
@@ -373,12 +373,22 @@ def subject_for(count, region):
     question moves to the front and the patch becomes what gets cut instead.
     Nothing is dropped and nothing is reworded; the order changes so that
     truncation costs the least important part.
+
+    `period` is "this week" or "in four weeks", the two forms the Variant C
+    subject is specified with.
     """
-    standard = '%d new food & drink venues in %s this week %s any use?' % (
-        count, region, DASH)
+    noun = 'venue' if count == 1 else 'venues'
+    standard = '%d new food & drink %s in %s %s %s any use?' % (
+        count, noun, region, period, DASH)
     if len(standard) <= SUBJECT_MAX:
         return standard
-    return 'Any use? %d new food & drink venues in %s this week' % (count, region)
+    return 'Any use? %d new food & drink %s in %s %s' % (
+        count, noun, region, period)
+
+
+def sentence_start(text):
+    """Region labels are stored as they read mid-sentence ("the North West")."""
+    return text[:1].upper() + text[1:]
 
 
 def lead_in(count):
@@ -429,6 +439,15 @@ def build(row, index, pools, conn):
     lines = '\n'.join('%s %s' % (BULLET, venue_line(r)) for r in picked)
     greeting = row[index['greeting']]
 
+    if variant in ('A', 'B') and not week:
+        # Variant A says "[N] came up in [region] this week" and then lists
+        # them. With nothing this week it produced "0 came up ... All of them:"
+        # above an empty list (Neighbourhood Coffee, 12 Nov). The quiet-week
+        # wording was only ever decided for Variant C, so refuse here too.
+        raise CannotDraft(
+            'no venues this week, and Variant %s introduces a list of them -- '
+            'needs the quiet-week form, or a later send day' % variant)
+
     if variant == 'A':
         subject = subject_for(len(week), label)
         body = TEMPLATE_A.format(
@@ -474,34 +493,73 @@ def build(row, index, pools, conn):
                      'to sign.' % (DASH, DASH)))
 
     elif variant == 'C':
+        # Three forms, by how quiet the patch actually is. All three end on the
+        # same question -- do you reach further than your website says? -- and
+        # all three need somewhere wider to ask it about.
         widen_to = row[index['widen_to']]
-        widen_month = row[index['widen_four_weeks']]
-        if not week:
-            # The copy says "that's all of this week's" and then lists them.
-            # With nothing to list there is no sentence, and the document does
-            # not say what replaces it. Refuse rather than invent.
-            raise CannotDraft(
-                "no venues this week, and Variant C's list is introduced by "
-                "\"that's all of this week's\" -- needs a wording decision")
         if not widen_to or widen_to == 'nothing wider available':
             raise CannotDraft(
-                'nothing to widen to, and the pivot asks "do you cover that '
-                'far?" about somewhere -- needs a wording decision')
-        subject = subject_for(len(week), label)
+                'nothing to widen to, and every form of Variant C asks "do you '
+                '%s that far?" about somewhere' % voice['verb'])
+        # Counted live, like every other figure, not read from the workbook.
+        wider, _ = filter_records(
+            pools['four'], audience=voice['audience'],
+            authorities=territories.resolve(conn, widen_to))
+        if not wider:
+            raise CannotDraft('%s produced nothing over four weeks either'
+                              % widen_to)
+        standard_pivot = wrap(
+            "That's probably not enough to be worth your time. If there were "
+            'more of them, would this be useful to you? %s produced %d over '
+            'the same four weeks %s do you %s that far?'
+            % (sentence_start(widen_to), len(wider), DASH, voice['verb']))
+
+        if week:
+            # The form in the copy document: this week's venues, all of them.
+            subject = subject_for(len(week), label)
+            premise = wrap(
+                "I'm writing with a question rather than a pitch: %s is quiet. "
+                "%d came up in this week's run, and %d over the last four "
+                'weeks. %s:'
+                % (label, len(week), len(four),
+                   "That's all of this week's" if len(week) <= 5
+                   else "Five of this week's"))
+            pivot = standard_pivot
+        elif four:
+            # Quiet week (decided 11 Nov 2026): nothing this week, so the list
+            # is the month's instead. The email keeps its evidence, and the
+            # subject takes the "in four weeks" form.
+            picked = order_venues(four, 5)
+            subject = subject_for(len(four), label, 'in four weeks')
+            premise = wrap(
+                "I'm writing with a question rather than a pitch: %s is quiet. "
+                "Nothing came up in this week's run, and %d over the last four "
+                'weeks. %s:' % (label, len(four), lead_in(len(four))))
+            pivot = standard_pivot
+        else:
+            # Empty month (decided 11 Nov 2026): the patch has nothing to count
+            # or list, so the email says so plainly and leads with the wider
+            # region, whose venues are the evidence. The subject names the
+            # wider region because there is no honest number for the patch.
+            picked = order_venues(wider, 5)
+            subject = subject_for(len(wider), widen_to, 'in four weeks')
+            premise = wrap(
+                "I'm writing with a question rather than a pitch: %s is quiet. "
+                'Nothing has come up there in the last four weeks. %s produced '
+                '%d over the same four weeks. %s:'
+                % (label, sentence_start(widen_to), len(wider),
+                   lead_in(len(wider))))
+            pivot = wrap(
+                "If that's within reach, would this be useful to you %s do "
+                'you %s that far?' % (DASH, voice['verb']))
+
         body = TEMPLATE_C.format(
             greeting=greeting,
             opening=opening,
-            premise=wrap(
-                "I'm writing with a question rather than a pitch: %s is quiet. "
-                "%d came up in this week's run, and %d over the last four "
-                "weeks. That's all of this week's:"
-                % (label, len(week), len(four))),
-            venue_lines=lines,
-            pivot=wrap(
-                "That's probably not enough to be worth your time. If there "
-                'were more of them, would this be useful to you? %s produced '
-                '%d over the same four weeks %s do you %s that far?'
-                % (widen_to, widen_month, DASH, voice['verb'])),
+            premise=premise,
+            venue_lines='\n'.join('%s %s' % (BULLET, venue_line(r))
+                                  for r in picked),
+            pivot=pivot,
             cta=wrap("Reply and I'll send this week's report over, cut down to "
                      'whatever your patch actually is. Free, nothing to sign.'))
 
