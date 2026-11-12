@@ -200,8 +200,13 @@ passed. Baseline summary: `docs/dmarc-baseline-2026-11-05.txt`.
 ## 6. Working on Andrew's computer
 
 Sessions reach the folder through the Cowork device shell, where it is
-mounted at `$HOME/mnt/FSA Data Pipeline`.
+mounted at `$HOME/mnt/FSA Data Pipeline`. On the PC it is
+`C:\ANDY\Dev\claude\FSA Data Pipeline`.
 
+- **Each new chat starts from scratch.** The folder must be added again
+  ("Add folder" in the desktop app), and the shell has no packages and no
+  shim. Set-up, once per chat (a minute or so):
+  `pip install -q tomli -r requirements.txt`, then create the shim below.
 - **Python 3.10 has no `tomllib`.** Run scripts with
   `PYTHONPATH="$HOME/shim:$PWD"`. If `$HOME/shim/tomllib.py` is missing, it is
   two lines: `from tomli import *` and
