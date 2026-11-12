@@ -176,6 +176,24 @@ TEMPLATE_A = """{greeting}
 
 """ + SIGNOFF
 
+# A in a week with nothing (decided 12 Nov 2026). The list and the subject
+# switch to the four weeks, which is the figure the gate judges on anyway, and
+# the provenance line folds into the premise because there is no "this week's
+# run" left to attribute the list to. Pitch and call to action are unchanged.
+TEMPLATE_A_QUIET = """{greeting}
+
+{opening}
+
+{premise}
+
+{venue_lines}
+
+{pitch}
+
+{cta}
+
+""" + SIGNOFF
+
 # B -- national. "[region]" means nothing to a supplier who ships everywhere,
 # so the count leads and the call to action sells sortability instead: they
 # split the list between reps, which is what the spreadsheet is for.
@@ -419,6 +437,20 @@ def split_sentence(new_count, total):
     return '. %d are brand-new openings, the rest changes of hand' % new_count
 
 
+def four_week_split(new_count, total):
+    """What follows "but [N] did over the last four weeks --" in the quiet-week
+    Variant A premise. Same edge cases as split_sentence."""
+    if total == 1:
+        return 'a brand-new opening' if new_count else 'a change of hands'
+    if new_count == 0:
+        return 'all changes of hand'
+    if new_count == total:
+        return 'all brand-new openings'
+    if new_count == 1:
+        return '1 brand-new opening, the rest changes of hand'
+    return '%d brand-new openings, the rest changes of hand' % new_count
+
+
 def build(row, index, pools, conn):
     voice = VOICE[row[index['category']]]
     variant = row[index['email_variant']]
@@ -439,16 +471,38 @@ def build(row, index, pools, conn):
     lines = '\n'.join('%s %s' % (BULLET, venue_line(r)) for r in picked)
     greeting = row[index['greeting']]
 
-    if variant in ('A', 'B') and not week:
-        # Variant A says "[N] came up in [region] this week" and then lists
-        # them. With nothing this week it produced "0 came up ... All of them:"
-        # above an empty list (Neighbourhood Coffee, 12 Nov). The quiet-week
-        # wording was only ever decided for Variant C, so refuse here too.
-        raise CannotDraft(
-            'no venues this week, and Variant %s introduces a list of them -- '
-            'needs the quiet-week form, or a later send day' % variant)
+    if variant == 'B' and not week:
+        # A national week with nothing in it means the pipeline is broken, not
+        # that the country is quiet. Refuse rather than send "0 came up".
+        raise CannotDraft('no venues across the UK this week -- check the run')
 
-    if variant == 'A':
+    if variant == 'A' and not week:
+        # Quiet week (decided 12 Nov 2026). Before this the template produced
+        # "0 came up in Liverpool this week. All of them:" above an empty list.
+        if not four:
+            raise CannotDraft('nothing this week or in four weeks for %s' % label)
+        picked = order_venues(four, 5)
+        four_new = sum(1 for r in four if r['classification'] == 'NEW_VENUE')
+        subject = subject_for(len(four), label, 'in four weeks')
+        body = TEMPLATE_A_QUIET.format(
+            greeting=greeting,
+            opening=opening,
+            premise=wrap(
+                "Nothing came up in %s in this week's run, but %d did over the "
+                'last four weeks %s %s. %s:'
+                % (label, len(four), DASH, four_week_split(four_new, len(four)),
+                   lead_in(len(four)))),
+            venue_lines='\n'.join('%s %s' % (BULLET, venue_line(r))
+                                  for r in picked),
+            pitch=wrap("I'm not selling anything %s I just want to know if "
+                       "it's any use to %s. %s"
+                       % (DASH, voice['trade'], voice['question'])),
+            cta=wrap("Reply and I'll send this week's report over %s for the "
+                     'whole country, or tell me your postcode and how far you '
+                     "%s and I'll cut it down to your patch. Free, nothing to "
+                     'sign.' % (DASH, voice['verb'])))
+
+    elif variant == 'A':
         subject = subject_for(len(week), label)
         body = TEMPLATE_A.format(
             greeting=greeting,

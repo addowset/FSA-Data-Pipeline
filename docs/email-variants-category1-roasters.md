@@ -493,6 +493,27 @@ Opendo, 54 Beverley Road, Bristol BS7 0JN
 Reply 'no thanks' and I won't contact you again.
 ```
 
+### Variant A in a week with nothing
+
+*Decided 12 November 2026. Neighbourhood Coffee (Liverpool) stood at nought for the week and
+eleven for the month on its send day, and the body came out as "0 came up in Liverpool this
+week. All of them:" above an empty list. It was caught before sending and moved to 17 November.*
+
+The subject and list switch to the four weeks, the figure the send gate judges on anyway. The
+provenance line folds into the premise, since there is no "this week's run" left to attribute
+the list to. Pitch and call to action are unchanged:
+
+```
+Subject: [N_month] new food & drink venues in [region] in four weeks — any use?
+
+Nothing came up in [region] in this week's run, but [N_month] did over the last
+four weeks — [N_new] brand-new openings, the rest changes of hand. [Five of
+them / All of them / Here it is]:
+```
+
+Variant B refuses to draft with an empty week: nothing across the whole UK means the run
+failed, not that the country was quiet.
+
 ### When the patch is quieter than the copy assumes
 
 *Decided 11 November 2026. The body above says "[N] came up in this week's run… That's all of
