@@ -1127,6 +1127,20 @@ cold email reads as a mail merge.
 The script also warns about a venue with no postcode, a venue whose town could
 not be resolved, and a list with no takeover in it.
 
+**When a patch is quieter than the copy assumes**, the wording changes rather
+than printing "0 came up". Variant A with nothing this week switches its
+subject and list to the four-week venues. Variant C has three forms: this
+week's venues; a quiet week, listing the four-week venues; and an empty month,
+leading with the wider region (`widen_to`, counted live) and listing from it.
+Variant B refuses an empty week outright, since nothing across the whole UK
+means the run failed. Each form, and why, is in
+`docs/email-variants-category1-roasters.md`.
+
+**Refusals are deliberate.** Where the copy has no decided wording for a case
+-- C with nowhere to widen to, a wider region that is also empty -- the script
+raises `CannotDraft` for that row and drafts the rest. The fix is a wording
+decision or a later send day, not a hand-written body.
+
 ## Rebuilding the database
 
 The database is derived, rebuildable state; the raw archive is the actual
@@ -1290,6 +1304,8 @@ exports/              stage 7's CSV deliverables, gitignored (can contain a buye
 docs/                 hand-made and tracked, unlike everything in exports/. These are
                         the only files in the project with no upstream source: lose one
                         and no amount of reprocessing raw/ brings it back.
+  campaign-runbook.md               start here: campaign status, the send-day
+                                      routine, reply handling, and the rules behind them
   leads_all_three_categories.xlsx   the supplier list and its send/reply tracking
   email-variants-category1-roasters.md   outreach and reply copy, with the reasoning
   lead-list-build-summary.md        how the list was researched

@@ -1,5 +1,9 @@
 # Project brief: UK new-venue signal pipeline
 
+> **Campaign work starts at `docs/campaign-runbook.md`**: status, the
+> send-day routine, reply handling and the rules behind them. This file is
+> the original build brief for the pipeline.
+
 Build a local, unattended data pipeline that detects newly registered UK food
 and drink businesses and classifies them as new openings or operator changes.
 
